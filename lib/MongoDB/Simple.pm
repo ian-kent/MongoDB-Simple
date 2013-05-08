@@ -464,4 +464,86 @@ sub object {
     #print STDERR "MongoDB:: object '$key' => { type => '$args->{type}' }\n";
 }
 
+=head1 NAME
+
+MongoDB::Simple
+
+=head1 SYNOPSIS
+
+    package My::Data::Class;
+    use base 'MongoDB::Simple';
+    use MongoDB::Simple;
+
+    database 'dbname';
+    collection 'collname';
+
+    string 'stringfield';
+    date 'datefield';
+    boolean 'booleanfield';
+    object 'objectfield';
+    array 'arrayfield';
+    object 'typedobject' => { type => 'My::Data::Class::Foo' };
+    array 'typedarray' => { type => 'My::Data::Class::Bar' };
+
+    package My::Data::Class::Foo;
+
+    parent type => 'My::Data::Class', key => 'typedobject';
+
+    string 'fooname';
+
+    package My::Data::Class::Bar;
+
+    parent type => 'My::Data::Class', key => 'typedarray';
+
+    string 'barname';
+
+    package main;
+
+    use MongoDB;
+    use DateTime;
+
+    my $mongo = new MongoClient;
+    my $cls = new My::Data::Class(client => $mongo);
+
+    $cls->stringfield("Example string");
+    $cls->datefield(DateTime->now);
+    $cls->booleanfield(true);
+    $cls->objectfield({ foo => "bar" });
+    push $cls->arrayfield, 'baz';
+
+    $cls->typedobject(new My::Data::Class::Foo);
+    $cls->typedobject->fooname('Foo');
+
+    my $bar = new My::Data::Class::Bar;
+    $bar->barname('Bar');
+    push $cls->typedarray, $bar;
+
+    my $id = $cls->save;
+
+    my $cls2 = new My::Data::Class(client => $mongo);
+    $cls2->load($id);
+
+=head1 DESCRIPTION
+
+L<MongoDB::Simple> simplifies mapping of MongoDB documents to Perl objects.
+
+=head1 SEE ALSO
+
+Documentation needs more work - refer to the examples in the t/test.t file.
+
+=head1 AUTHORS
+
+Ian Kent - <iankent@cpan.org> - original author
+
+=head1 COPYRIGHT AND LICENSE
+
+This library is free software under the same terms as perl itself
+
+Copyright (c) 2013 Ian Kent
+
+MongoDB::Simple is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the license for more details.
+
+=cut
+
 1;
