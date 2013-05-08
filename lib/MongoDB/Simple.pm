@@ -1,6 +1,6 @@
 package MongoDB::Simple;
 
-#use MongoDB;
+use MongoDB;
 use Mojo::Base -base;
 use Mojo::Exception;
 use Exporter;
@@ -10,32 +10,6 @@ use DateTime::Format::W3CDTF;
 use MongoDB::Simple::ArrayType;
 use Data::Dumper;
 our @EXPORT = qw/ collection string date array object parent dbref boolean oid database /;
-
-# package DB::User;
-# use Mojo::Base 'MongoDB::Simple';
-# use MongoDB::Simple;
-#
-# database 'scrum';
-# collection 'users';
-#
-# string 'username' => undef;
-# string 'password' => undef;
-# date 'created' => undef;
-# array 'permissions' => {
-#     type => 'User::Permission'
-# }
-# object 'profile' => {
-#     type => 'User::Profile'
-# }
-#
-# -----
-# 
-# my $db = new DB::User;
-# $db->load(oid('1'));
-# my $username = $db->username;
-# $username = 'foo';
-# $db->username($username);
-# $db->save;
 
 has 'client'; # stores the client (or can be passed in)
 has 'db'; # stores the database (or can be passed in)
@@ -50,6 +24,37 @@ has 'existsInDb';
 has 'debugMode';
 
 our %metadata = (); # internal metadata cache used for all packages
+
+################################################################################
+# Setup some MongoDB magic                                                     #
+################################################################################
+#
+# Lets us cast MongoDB results into classes
+# my $obj = db->coll->find_one({criteria})->as('ClassName');
+#
+no strict 'refs';
+no warnings 'redefine';
+my $mongodb_find_one = \&{'MongoDB::Collection::find_one'};
+*{'MongoDB::Simple::Collection::find_one::Result::as'} = sub {
+    my ($self, $as) = @_;
+    return $as->new(doc => $self);
+};
+*{'MongoDB::Collection::find_one'} = sub {
+    return mongodb_blessed_result(&$mongodb_find_one(@_));
+};
+my $mongodb_cursor_next = \&{'MongoDB::Cursor::next'};
+*{'MongoDB::Cursor::next'} = sub {
+    return mongodb_blessed_result(&$mongodb_cursor_next);
+};
+sub mongodb_blessed_result {
+    my ($result) = @_;
+    if($result) {
+        return bless $result, 'MongoDB::Simple::Collection::find_one::Result';
+    }
+    return $result;
+}
+use warnings 'redefine';
+use strict 'refs';
 
 ################################################################################
 # Object methods                                                               #
@@ -203,7 +208,11 @@ sub getUpdates {
                 my $mtype = $types{$type}; 
                 for my $chg (@{$chng->{$type}}) {
                     $changes{$mtype}{$field} = [] if !$changes{$mtype}{"$field"};
-                    push @{$changes{$mtype}{"$field"}}, $chg->doc;
+                    if($self->meta->{fields}->{$field}->{args}->{type}) {
+                        push @{$changes{$mtype}{"$field"}}, $chg->doc;
+                    } else {
+                        push @{$changes{$mtype}{"$field"}}, $chg;
+                    }
                 }
             }
         }

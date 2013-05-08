@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-use Test::More tests => 12;
+use Test::More tests => 9;
 
 use strict;
 use warnings;
@@ -16,7 +16,6 @@ use boolean;
 my $client = MongoDB::MongoClient->new;
 my $db = $client->get_database('mtest');
 $db->drop if $db;
-$db = undef;
 
 sub makeNewObject {
     my $obj = new MTest(client => $client);
@@ -38,6 +37,20 @@ sub makeNewObject {
     my $id = $obj->save;
     return ($id, $dt, $meta, $label);
 }
+
+subtest 'MongoDB methods' => sub {
+    plan tests => 2;
+
+    my ($id, $dt, $meta, $label) = makeNewObject;
+
+    my $obj = $db->get_collection('items')->find_one({'_id' => $id})->as('MTest');
+#    my $obj = $db->get_collection('items')->find_one({'_id' => $id});
+    isa_ok($obj, 'MTest', 'Object returned by find_one');
+
+    my $cursor = $db->get_collection('items')->find;
+    my $obj2 = $cursor->next->as('MTest');
+    isa_ok($obj2, 'MTest', 'Object returned by cursor');
+};
 
 subtest 'Object methods' => sub {
     plan tests => 8;
@@ -254,6 +267,57 @@ subtest 'Update a document - scalar arrays' => sub {
         ]
     }, 'Correct document returned by MongoDB driver');
 
+    for(my $i = 0; $i < 5; $i++) { 
+        push $obj->tags, 'new tag ' . ($i+1);;
+    }
+    is(scalar @{$obj->tags}, 7, 'New items are in array');
+    $obj->save;
+    $obj->load($id);
+    is($obj->hasChanges, 0, 'Loaded document has no changes');
+    is(scalar @{$obj->tags}, 7, 'New items can be retrieved');
+
+    is_deeply($obj->doc, {
+        "_id" => $id,
+        "name" => 'Test name',
+        "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+        "available" => true,
+        "attr" => { key1 => 'key 1', key2 => 'key 2' },
+        "tags" => ['tag1', 'tag2', 'new tag 1', 'new tag 2', 'new tag 3', 'new tag 4', 'new tag 5'],
+        "metadata" => {
+            "type" => 'meta type'
+        },
+        "labels" => [
+            { "text" => 'test label' }
+        ]
+    }, 'Correct document returned by MongoDB driver');
+};
+
+subtest 'Update a document - typed arrays' => sub {
+    plan tests => 7;
+
+    my ($id, $dt, $meta, $label) = makeNewObject;
+
+    my $obj = new MTest(client => $client);
+    $obj->load($id);
+    is($obj->hasChanges, 0, 'Loaded document has no changes');
+
+    is_deeply($obj->doc, {
+        "_id" => $id,
+        "name" => 'Test name',
+        "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+        "available" => true,
+        "attr" => { key1 => 'key 1', key2 => 'key 2' },
+        "tags" => ['tag1', 'tag2'],
+        "metadata" => {
+            "type" => 'meta type'
+        },
+        "labels" => [
+            {
+                "text" => 'test label'
+            }
+        ]
+    }, 'Correct document returned by MongoDB driver');
+
     my @labels = ();
     for(my $i = 0; $i < 5; $i++) { 
         my $l = new MTest::Label;
@@ -266,6 +330,7 @@ subtest 'Update a document - scalar arrays' => sub {
     $obj->load($id);
     is($obj->hasChanges, 0, 'Loaded document has no changes');
     is(scalar @{$obj->labels}, 6, 'New items can be retrieved');
+    is(ref $obj->labels->[3], 'MTest::Label', 'Retrieved object has correct type');
 
     is_deeply($obj->doc, {
         "_id" => $id,
@@ -288,67 +353,34 @@ subtest 'Update a document - scalar arrays' => sub {
     }, 'Correct document returned by MongoDB driver');
 };
 
-subtest 'Update a document - typed arrays' => sub {
-    plan tests => 1;
-    ok(1);
-};
-
 subtest 'Update a document - objects' => sub {
-    plan tests => 1;
-    ok(1);
+    plan tests => 3;
+
+    my ($id, $dt, $meta, $label) = makeNewObject;
+
+    my $obj = new MTest(client => $client);
+    $obj->load($id);
+    is($obj->hasChanges, 0, 'Loaded document has no changes');
+
+    is_deeply($obj->doc, {
+        "_id" => $id,
+        "name" => 'Test name',
+        "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+        "available" => true,
+        "attr" => { key1 => 'key 1', key2 => 'key 2' },
+        "tags" => ['tag1', 'tag2'],
+        "metadata" => {
+            "type" => 'meta type'
+        },
+        "labels" => [
+            {
+                "text" => 'test label'
+            }
+        ]
+    }, 'Correct document returned by MongoDB driver');
+   
+    $obj->metadata->type('new meta type');
+    $obj->save;
+    $obj->load($id);
+    is($obj->metadata->type, 'new meta type', 'String inside object is updated');
 };
-
-## Create an item
-#my $item = new MTest(client => $client);
-#$item->name("Test item");
-#$item->created(DateTime->now);
-#$item->available(true);
-#$item->tags(["test", "item"]);
-#
-## Create an inner object
-#my $meta = new MTest::Meta;
-#$meta->type("Meta type");
-#$item->metadata($meta);
-#
-## Add an object to an array
-## FIXME doesn't actually save the item
-#my $label = new MTest::Label;
-#$label->text("Test label");
-#push $item->labels, $label;
-#
-## Save the new item
-#my $id = $item->save;
-#
-## Load the new item
-#my $item2 = new MTest(client => $client);
-#$item2->load($id);
-#$item2->dump;
-#
-## Change its available value
-#$item2->available(false);
-#$item2->save;
-#
-## Load the item again
-#my $item3 = new MTest(client => $client);
-#$item3->load($id);
-#$item3->dump;
-#
-## Change a value on an inner object
-#my $meta = $item3->metadata;
-#$meta->type("Changed");
-#$item3->save;
-#
-## Load it again
-#my $item4 = new MTest(client => $client);
-#$item4->load($id);
-#use Data::Dumper;
-#print Dumper $item4->doc;
-#
-## Change an array item
-## FIXME doesn't detect changes to arrays
-#
-#
-## TODO
-## when getting changes, loop through arrays to get changed values
-## track when adding/removing items from array
-
