@@ -1,7 +1,7 @@
 package MTest;
 
-use Mojo::Base 'MongoDB::Simple';
 use MongoDB::Simple;
+our @ISA = ('MongoDB::Simple');
 
 database 'mtest';
 collection 'items';
@@ -10,8 +10,8 @@ string 'name'        => {
     changed => sub {
         my ($self, $value) = @_;
         eval {
-            my $obj = new MTest::Duplicate(client => $self->client);
-            $obj->load($self->doc->{_id});
+            my $obj = new MTest::Duplicate(client => $self->{client});
+            $obj->load($self->{doc}->{_id});
             $obj->name($value);
             $obj->save;
         };
@@ -25,12 +25,14 @@ object 'metadata'    => { type => 'MTest::Meta' };
 array 'labels'       => { type => 'MTest::Label' };
 array 'multi'        => { types => [ 'MTest::Meta', 'MTest::Label' ] };
 
+################################################################################
+
 package MTest::Meta;
 
-use Mojo::Base 'MongoDB::Simple';
 use MongoDB::Simple;
+our @ISA = ('MongoDB::Simple');
 
-parent type => 'MTest', key => 'metadata';
+#parent type => 'MTest', key => 'metadata';
 
 matches sub {
     my ($doc) = @_;
@@ -41,12 +43,14 @@ matches sub {
 
 string 'type'  => undef;
 
+################################################################################
+
 package MTest::Label;
 
-use Mojo::Base 'MongoDB::Simple';
 use MongoDB::Simple;
+our @ISA = ('MongoDB::Simple');
 
-parent type => 'MTest', key => 'labels';
+#parent type => 'MTest', key => 'labels';
 
 matches sub {
     my ($doc) = @_;
@@ -57,11 +61,12 @@ matches sub {
 
 string 'text'  => undef;
 
+################################################################################
+
 package MTest::Duplicate;
 
-use Mojo::Base 'MongoDB::Simple';
 use MongoDB::Simple;
-use Data::Dumper;
+our @ISA = ('MongoDB::Simple');
 
 database 'mtest';
 collection 'itemlist';
@@ -79,5 +84,7 @@ locator sub {
         }
     };
 };
+
+################################################################################
 
 1;

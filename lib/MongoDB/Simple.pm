@@ -1,28 +1,15 @@
 package MongoDB::Simple;
 
-use MongoDB;
-use Mojo::Base -base;
-use Mojo::Exception;
 use Exporter;
+our @EXPORT = qw/ collection string date array object parent dbref boolean oid database locator matches /;
+
+use MongoDB;
+use MongoDB::Simple::ArrayType;
+
 use Switch;
 use DateTime;
 use DateTime::Format::W3CDTF;
-use MongoDB::Simple::ArrayType;
 use Data::Dumper;
-our @EXPORT = qw/ collection string date array object parent dbref boolean oid database locator matches /;
-
-has 'client'; # stores the client (or can be passed in)
-has 'db'; # stores the database (or can be passed in)
-has 'col'; # stores the collection (or can be passed in)
-has 'meta'; # stores the keyword metadata
-has 'doc'; # stores the document
-has 'changes'; # stores changes made since load/save
-has 'callbacks'; # stores callbacks needed for changes
-has 'parent'; # stores the parent object
-has 'objcache'; # stores created objects
-has 'arraycache'; # stores array objects
-has 'existsInDb';
-has 'debugMode';
 
 our %metadata = (); # internal metadata cache used for all packages
 
@@ -33,29 +20,32 @@ our %metadata = (); # internal metadata cache used for all packages
 # Lets us cast MongoDB results into classes
 # my $obj = db->coll->find_one({criteria})->as('ClassName');
 #
-no strict 'refs';
-no warnings 'redefine';
-my $mongodb_find_one = \&{'MongoDB::Collection::find_one'};
-*{'MongoDB::Simple::Collection::find_one::Result::as'} = sub {
-    my ($self, $as) = @_;
-    return $as->new(doc => $self);
-};
-*{'MongoDB::Collection::find_one'} = sub {
-    return mongodb_blessed_result(&$mongodb_find_one(@_));
-};
-my $mongodb_cursor_next = \&{'MongoDB::Cursor::next'};
-*{'MongoDB::Cursor::next'} = sub {
-    return mongodb_blessed_result(&$mongodb_cursor_next);
-};
-sub mongodb_blessed_result {
-    my ($result) = @_;
-    if($result) {
-        return bless $result, 'MongoDB::Simple::Collection::find_one::Result';
+{
+    no strict 'refs';
+    no warnings 'redefine';
+
+    my $mongodb_find_one = \&{'MongoDB::Collection::find_one'};
+    *{'MongoDB::Simple::Collection::find_one::Result::as'} = sub {
+        my ($self, $as) = @_;
+        return $as->new(doc => $self);
+    };
+
+    *{'MongoDB::Collection::find_one'} = sub {
+        return mongodb_blessed_result(&$mongodb_find_one(@_));
+    };
+    my $mongodb_cursor_next = \&{'MongoDB::Cursor::next'};
+    *{'MongoDB::Cursor::next'} = sub {
+        return mongodb_blessed_result(&$mongodb_cursor_next);
+    };
+
+    sub mongodb_blessed_result {
+        my ($result) = @_;
+        if($result) {
+            return bless $result, 'MongoDB::Simple::Collection::find_one::Result';
+        }
+        return $result;
     }
-    return $result;
 }
-use warnings 'redefine';
-use strict 'refs';
 
 ################################################################################
 # Object methods                                                               #
@@ -64,47 +54,59 @@ use strict 'refs';
 sub new {
     my ($class, %args) = @_;
 
-    my $self = Mojo::Base::new(@_);
+    my $self = bless {
+        'client'        => undef, # stores the client (or can be passed in)
+        'db'            => undef, # stores the database (or can be passed in)
+        'col'           => undef, # stores the collection (or can be passed in)
+        'meta'          => undef, # stores the keyword metadata
+        'doc'           => {}, # stores the document
+        'changes'       => {}, # stores changes made since load/save
+        'callbacks'     => [], # stores callbacks needed for changes
+        'parent'        => undef, # stores the parent object
+        'objcache'      => {}, # stores created objects
+        'arraycache'    => {}, # stores array objects
+        'existsInDb'    => 0,
+        'debugMode'     => 0,
+        %args
+    }, $class;
 
-    $self->meta($self->getmeta);
-    if(!$self->col) {
-        if(!$self->db) {
-            if($self->client) {
-                $self->db($self->client->get_database($self->meta->{database}));
+    # Get metadata for this class
+    $self->{meta} = $self->getmeta;
+
+    # Setup db/collection
+    if(!$self->{col}) {
+        if(!$self->{db}) {
+            if($self->{client} && $self->{meta}->{database}) {
+                $self->{db} = $self->{client}->get_database($self->{meta}->{database});
             }
         }
-        if($self->client && $self->db) {
-            $self->col($self->db->get_collection($self->meta->{collection}));
+        if($self->{client} && $self->{db} && !$self->{col} && $self->{meta}->{collection}) {
+            $self->{col} = $self->{db}->get_collection($self->{meta}->{collection});
         }
     }
-    if(!$self->doc) {
-        $self->doc({});
-    }
-    $self->changes({});
-    $self->callbacks([]);
-    $self->objcache({});
-    $self->arraycache({});
-    $self->existsInDb(0);
 
-    # Done once first time new is called so field names can replace keywords below
-    no strict 'refs';
-    if(!$self->meta->{compiled}) {
-        for my $field (keys %{$self->meta->{fields}}) {
-            my $type = $self->meta->{fields}->{$field}->{type};
-            $self->log("   -- injecting method for field '$field' as type '$type'");
-            switch ($type) {
-                case "string" { *{$class.'::'.$field} = sub { return stringAccessor(shift, $field, @_); } }
-                case "date" { *{$class.'::'.$field} = sub { return dateAccessor(shift, $field, @_); } }
-                case "boolean" { *{$class.'::'.$field} = sub { return booleanAccessor(shift, $field, @_); } }
-                case "array" { *{$class.'::'.$field} = sub { return arrayAccessor(shift, $field, @_); } }
-                case "object" { *{$class.'::'.$field} = sub { return objectAccessor(shift, $field, @_); } }
-                case "dbref" { *{$class.'::'.$field} = sub { return dbrefAccessor(shift, $field, @_); } }
+    # Inject field methods, done first time object of this type is constructed instead of 
+    # build time so we can use field names which clash with helper keywords
+    {
+        no strict 'refs';
+        if(!$self->{meta}->{compiled}) {
+            for my $field (keys %{$self->{meta}->{fields}}) {
+                my $type = $self->{meta}->{fields}->{$field}->{type};
+                $self->log("   -- injecting method for field '$field' as type '$type'");
+                switch ($type) {
+                    case "string" { *{$class.'::'.$field} = sub { return stringAccessor(shift, $field, @_); } }
+                    case "date" { *{$class.'::'.$field} = sub { return dateAccessor(shift, $field, @_); } }
+                    case "boolean" { *{$class.'::'.$field} = sub { return booleanAccessor(shift, $field, @_); } }
+                    case "array" { *{$class.'::'.$field} = sub { return arrayAccessor(shift, $field, @_); } }
+                    case "object" { *{$class.'::'.$field} = sub { return objectAccessor(shift, $field, @_); } }
+                    case "dbref" { *{$class.'::'.$field} = sub { return dbrefAccessor(shift, $field, @_); } }
+                }
+                $self->log("-- creating field $field");
             }
-            $self->log("-- creating field $field");
+            #addmeta('compiled', 1);
+            my $pkg = ref $self;
+            $metadata{$pkg}{compiled} = 1;
         }
-        #addmeta('compiled', 1);
-        my $pkg = ref $self;
-        $metadata{$pkg}{compiled} = 1;
     }
 
     return $self;
@@ -112,49 +114,51 @@ sub new {
 
 sub log {
     my $self = shift;
-    print STDERR (@_, "\n") if $self->debugMode;
+    print STDERR (@_, "\n") if $self->{debugMode};
 }
 
 sub load {
-    #my ($self, $id) = @_;
     my $self = shift;
 
-    my $doc = $self->col->find_one($self->getLocator(@_));
+    my $locator = $self->getLocator(@_);
+    my $doc = $self->{col}->find_one($locator);
 
     if(!$doc) {
-        Mojo::Exception->throw("Failed to load document with id: @_");
+        die("Failed to load document with locator: " . (Dumper $locator));
     }
 
-    $self->existsInDb(1);
-    $self->doc($doc);
-    $self->changes({});
-    $self->callbacks([]);
-    $self->objcache({});
-    $self->arraycache({});
+    $self->{existsInDb} = 1;
+    $self->{doc} = $doc;
+    $self->{changes} = {};
+    $self->{callbacks} = [];
+    $self->{objcache} = {};
+    $self->{arraycache} = {};
 }
 
-# Can be overridden ($self, @args) to provide a different matching mechanism
-# better to use locator sub {}
 sub getLocator {
     my ($self, $id) = @_;
 
-    if($self->meta->{locator}) {
-        my $loc = $self->meta->{locator};
+    # Use a locator{} block if its defined
+    if($self->{meta}->{locator}) {
+        my $loc = $self->{meta}->{locator};
         return &$loc($self, $id);
     }
 
+    # If id provided isn't a hash, return a mongodb _id matching hash
     if(ref($id) !~ /HASH/) {
         return {
-            "_id" => $id // $self->doc->{_id}
+            "_id" => $id // $self->{doc}->{_id}
         };
     };
+
+    # Otherwise return whatever was passed in
     return $id;
 }
 
 sub save {
     my ($self) = @_;
 
-    if($self->existsInDb) {
+    if($self->{existsInDb}) {
         $self->log("Save:: updates:");
         my $updates = $self->getUpdates;
         $self->log(Dumper $updates);
@@ -163,22 +167,21 @@ sub save {
             return 0;
         }
         $self->log("Exists in db, locator: " . $self->getLocator);
-        $self->col->update($self->getLocator, $updates);
-        $self->changes({});
-        # TODO callbacks
-        for my $cb (@{$self->callbacks}) {
+        $self->{col}->update($self->getLocator, $updates);
+        $self->{changes} = {};
+        for my $cb (@{$self->{callbacks}}) {
             &$cb;
         }
-        $self->callbacks([]);
+        $self->{callbacks} = [];
     } else {
-        my $changes = $self->changes;
-        $self->log("nSave:: changes:");
+        my $changes = $self->{changes};
+        $self->log("Save:: changes:");
         $self->log(Dumper $changes);
         $self->log("Doesn't exist in db");
-        my $id = $self->col->insert($changes);
-        $self->existsInDb(1);
-        $self->changes({});
-        $self->callbacks([]);
+        my $id = $self->{col}->insert($changes);
+        $self->{existsInDb} = 1;
+        $self->{changes} = {};
+        $self->{callbacks} = [];
         $self->log(Dumper $id);
         return $id;
     }
@@ -187,7 +190,7 @@ sub save {
 sub hasChanges {
     my ($self) = @_;
 
-    return scalar keys %{$self->changes} > 0 ? 1 : 0;
+    return scalar keys %{$self->{changes}} > 0 ? 1 : 0;
 }
 
 sub getUpdates {
@@ -196,16 +199,20 @@ sub getUpdates {
     $self->log("getUpdates for " . ref($self));
     my %changes = ();
 
-    for my $key (keys %{$self->changes}) {
-        next if $self->meta->{fields}->{$key}->{type} =~ /array/i;
+    # Start with anything added to the changes hash
+    for my $key (keys %{$self->{changes}}) {
+        # Arrays are done below
+        next if $self->{meta}->{fields}->{$key}->{type} =~ /array/i;
+
         $self->log(" - adding change for $key:");
-        $self->log(Dumper $self->changes->{$key});
-        $changes{'$set'}{$key} = $self->changes->{$key};
+        $self->log(Dumper $self->{changes}->{$key});
+        $changes{'$set'}{$key} = $self->{changes}->{$key};
     }
 
-    for my $field (keys %{$self->meta->{fields}}) {
+    # Next loop fields looking for objects or arrays
+    for my $field (keys %{$self->{meta}->{fields}}) {
         $self->log("checking field $field");
-        if($self->meta->{fields}->{$field}->{type} =~ /object/i) {
+        if($self->{meta}->{fields}->{$field}->{type} =~ /object/i) {
             $self->log(" - field $field is object type");
             my $obj = $self->$field;
             my $chng = ref($obj) && ref($obj) !~ /HASH/ ? $obj->getUpdates : $obj;
@@ -214,19 +221,19 @@ sub getUpdates {
                 $changes{'$set'}{"$field.$chg"} = $chng->{'$set'}->{$chg};
             }
         }
-        if($self->meta->{fields}->{$field}->{type} =~ /array/i) {
+        if($self->{meta}->{fields}->{$field}->{type} =~ /array/i) {
             $self->log(" - field $field is array type");
             $self->$field; # triggers array initialisation if it hasn't already happened
-            my $arr = $self->arraycache->{$field}->{objref};
-            my $chng = $arr->changes;
+            my $arr = $self->{arraycache}->{$field}->{objref};
+            my $chng = $arr->{changes};
             $self->log(Dumper $chng);
             my %types = ( '$push' => '$pushAll' );
             for my $type (keys %types) {
                 my $mtype = $types{$type}; 
                 for my $chg (@{$chng->{$type}}) {
                     $changes{$mtype}{$field} = [] if !$changes{$mtype}{"$field"};
-                    if($self->meta->{fields}->{$field}->{args}->{type} || $self->meta->{fields}->{$field}->{args}->{types}) {
-                        push @{$changes{$mtype}{"$field"}}, $chg->doc;
+                    if($self->{meta}->{fields}->{$field}->{args}->{type} || $self->{meta}->{fields}->{$field}->{args}->{types}) {
+                        push @{$changes{$mtype}{"$field"}}, $chg->{doc};
                     } else {
                         push @{$changes{$mtype}{"$field"}}, $chg;
                     }
@@ -243,7 +250,7 @@ sub dump {
     my ($self) = @_;
 
     $self->log("Dumping " . (ref $self));
-    for my $field ( keys %{$self->meta->{fields}} ) {
+    for my $field ( keys %{$self->{meta}->{fields}} ) {
         $self->log("    $field => " . $self->$field);
     }
 }
@@ -255,9 +262,9 @@ sub dump {
 sub lookForCallbacks {
     my ($self, $field, $value) = @_;
 
-    if($self->meta->{fields}->{$field}->{args}->{changed}) {
-        push $self->callbacks, sub {
-            my $cb = $self->meta->{fields}->{$field}->{args}->{changed};
+    if($self->{meta}->{fields}->{$field}->{args}->{changed}) {
+        push $self->{callbacks}, sub {
+            my $cb = $self->{meta}->{fields}->{$field}->{args}->{changed};
             &$cb($self, $value);
         };
     }
@@ -266,14 +273,14 @@ sub defaultAccessor {
     my ($self, $field, $value) = @_;
 
     if(scalar @_ <= 2) {
-        return $self->changes->{$field} // $self->doc->{$field};
+        return $self->{changes}->{$field} // $self->{doc}->{$field};
     }
 
-    return if $self->doc && $value && $self->doc->{$field} && $value eq $self->doc->{$field};
+    return if $self->{doc} && $value && $self->{doc}->{$field} && $value eq $self->{doc}->{$field};
 
-    $self->changes->{$field} = $value;
+    $self->{changes}->{$field} = $value;
     # XXX unsure if we want to set doc or not.... if we do, it makes insert/upsert easier
-    $self->doc->{$field} = $value;
+    $self->{doc}->{$field} = $value;
 
     $self->lookForCallbacks($field, $value);
 }
@@ -288,7 +295,7 @@ sub dateAccessor {
     my ($self, $field, $value) = @_;
 
     if(scalar @_ <= 2) {
-        $value = $self->changes->{$field} // $self->doc->{$field};
+        $value = $self->{changes}->{$field} // $self->{doc}->{$field};
         $value = DateTime::Format::W3CDTF->new->parse_datetime($value) if $value;
         return $value;
     }
@@ -297,11 +304,11 @@ sub dateAccessor {
         $value = DateTime::Format::W3CDTF->new->format_datetime($value);
     }
 
-    return if $self->doc && $value && $self->doc->{$field} && $value eq $self->doc->{$field};
+    return if $self->{doc} && $value && $self->{doc}->{$field} && $value eq $self->{doc}->{$field};
 
-    $self->changes->{$field} = $value;
+    $self->{changes}->{$field} = $value;
     # XXX unsure if we want to set doc or not.... if we do, it makes insert/upsert easier
-    $self->doc->{$field} = $value;
+    $self->{doc}->{$field} = $value;
 
     $self->lookForCallbacks($field, $value);
 }
@@ -309,16 +316,16 @@ sub arrayAccessor {
     my ($self, $field, $value) = @_;
 
     if(scalar @_ <= 2) {
-        if($self->arraycache->{$field}) {
-            return $self->arraycache->{$field}->{arrayref};
+        if($self->{arraycache}->{$field}) {
+            return $self->{arraycache}->{$field}->{arrayref};
         }
 
         my @arr;
-        my $docval = $self->doc->{$field};
+        my $docval = $self->{doc}->{$field};
         if($docval) {
             for my $item (@$docval) {
-                my $type = $self->meta->{fields}->{$field}->{args}->{type};
-                my $types = $self->meta->{fields}->{$field}->{args}->{types};
+                my $type = $self->{meta}->{fields}->{$field}->{args}->{type};
+                my $types = $self->{meta}->{fields}->{$field}->{args}->{types};
                 if($type) {
                     push @arr, $type->new(parent => $self, doc => $item);
                 } elsif ($types) {
@@ -335,7 +342,7 @@ sub arrayAccessor {
                         }
                     }
                     if(!$matched) {
-                        Mojo::Exception->throw('No type matched current document');
+                        die('No type matched current document: ' . Dumper $item);
                     }
                 } else {
                     push @arr, $item;
@@ -343,7 +350,7 @@ sub arrayAccessor {
             }
         }
         my $a = tie my @array, 'MongoDB::Simple::ArrayType', parent => $self, field => $field, array => \@arr;
-        $self->arraycache->{$field} = {
+        $self->{arraycache}->{$field} = {
             arrayref => \@array,
             objref => $a
         };
@@ -351,55 +358,55 @@ sub arrayAccessor {
         return \@array;
     }
 
-    return if $self->doc && $value && $self->doc->{$field} && $value eq $self->doc->{$field};
+    return if $self->{doc} && $value && $self->{doc}->{$field} && $value eq $self->{doc}->{$field};
 
     if(!tied($value)) {
         my @array;
         my $a = tie @array, 'MongoDB::Simple::ArrayType', parent => $self, field => $field;
-        $self->arraycache->{$field} = {
+        $self->{arraycache}->{$field} = {
             arrayref => \@array,
             objref => $a
         };
         push @array, @$value;
-        $value = $a->array;
+        $value = $a->{array};
     }
 
-    $self->changes->{$field} = $value;
+    $self->{changes}->{$field} = $value;
     # XXX unsure if we want to set doc or not.... if we do, it makes insert/upsert easier
-    $self->doc->{$field} = $value;
+    $self->{doc}->{$field} = $value;
 
     $self->lookForCallbacks($field, $value);
 }
 sub objectAccessor {
     my ($self, $field, $value) = @_;
 
-    my $type = $self->meta->{fields}->{$field}->{args}->{type};
+    my $type = $self->{meta}->{fields}->{$field}->{args}->{type};
     my $obj;
 
     if(scalar @_ <= 2) {
         if($type) {
-            if($self->objcache->{$field}) {
-                return $self->objcache->{$field};
+            if($self->{objcache}->{$field}) {
+                return $self->{objcache}->{$field};
             }
-            if($self->doc->{$field}) {
-                $obj = $type->new(parent => $self, doc => $self->doc->{$field});
-                $self->objcache->{$field} = $obj;
+            if($self->{doc}->{$field}) {
+                $obj = $type->new(parent => $self, doc => $self->{doc}->{$field});
+                $self->{objcache}->{$field} = $obj;
             }
             return $obj;
         }
-        return $self->doc->{$field};
+        return $self->{doc}->{$field};
     }
 
     if(ref($value) !~ /^HASH$/) {
-        $self->objcache->{$field} = $value;
-        $value->parent($self);
-        $value = $value->doc;
+        $self->{objcache}->{$field} = $value;
+        $value->{parent} = $self;
+        $value = $value->{doc};
     }
-    return if $self->doc && $value && $self->doc->{$field} && $value eq $self->doc->{$field};
+    return if $self->{doc} && $value && $self->{doc}->{$field} && $value eq $self->{doc}->{$field};
 
-    $self->changes->{$field} = $value;
+    $self->{changes}->{$field} = $value;
     # XXX unsure if we want to set doc or not.... if we do, it makes insert/upsert easier
-    $self->doc->{$field} = $value;
+    $self->{doc}->{$field} = $value;
 
     $self->lookForCallbacks($field, $value);
 } 
@@ -412,6 +419,8 @@ sub dbrefAccessor {
 ################################################################################
 
 sub import {
+    my $class = caller;
+#    push @{"$class::ISA"}, $_[0];
     $Exporter::ExportLevel = 1;
     Exporter::import(@_);
 }

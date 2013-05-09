@@ -59,7 +59,7 @@ subtest 'Object methods' => sub {
     isa_ok($obj, 'MongoDB::Simple');
 
     # Has methods from MongoDB::Simple
-    can_ok($obj, "client", "db", "col", "meta", "doc", "changes", "parent", "objcache", "arraycache", "existsInDb", "hasChanges");
+    can_ok($obj, "hasChanges");
 
     # Has mongodb related methods
     can_ok($obj, "getUpdates", "dump", "locator", "load", "save");
@@ -146,7 +146,7 @@ subtest 'Fetch a document' => sub {
     $obj->load($id);
     is($obj->hasChanges, 0, 'Loaded document has no changes');
 
-    is_deeply($obj->doc, {
+    is_deeply($obj->{doc}, {
         "_id" => $id,
         "name" => 'Test name',
         "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
@@ -169,7 +169,7 @@ subtest 'Fetch a document' => sub {
     is_deeply($obj->tags, ['tag1','tag2'], 'Array retrieved');
     is($obj->tags->[0], 'tag1', 'Array item[0] retrieved');
     is($obj->tags->[1], 'tag2', 'Array item[1] retrieved');
-    is_deeply($obj->metadata->doc, $meta->doc, 'Object retrieved');
+    is_deeply($obj->metadata->{doc}, $meta->{doc}, 'Object retrieved');
     is($obj->metadata->type, 'meta type', 'Object property retrieved');
     is(ref $obj->metadata, 'MTest::Meta', 'Typed object retrieved');
     is(ref $obj->labels->[0], 'MTest::Label', 'Typed array item[0] retrieved');
@@ -186,7 +186,7 @@ subtest 'Update a document - scalars' => sub {
     $obj->load($id);
     is($obj->hasChanges, 0, 'Loaded document has no changes');
 
-    is_deeply($obj->doc, {
+    is_deeply($obj->{doc}, {
         "_id" => $id,
         "name" => 'Test name',
         "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
@@ -250,7 +250,7 @@ subtest 'Update a document - scalar arrays' => sub {
     $obj->load($id);
     is($obj->hasChanges, 0, 'Loaded document has no changes');
 
-    is_deeply($obj->doc, {
+    is_deeply($obj->{doc}, {
         "_id" => $id,
         "name" => 'Test name',
         "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
@@ -276,7 +276,7 @@ subtest 'Update a document - scalar arrays' => sub {
     is($obj->hasChanges, 0, 'Loaded document has no changes');
     is(scalar @{$obj->tags}, 7, 'New items can be retrieved');
 
-    is_deeply($obj->doc, {
+    is_deeply($obj->{doc}, {
         "_id" => $id,
         "name" => 'Test name',
         "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
@@ -301,7 +301,7 @@ subtest 'Update a document - typed arrays' => sub {
     $obj->load($id);
     is($obj->hasChanges, 0, 'Loaded document has no changes');
 
-    is_deeply($obj->doc, {
+    is_deeply($obj->{doc}, {
         "_id" => $id,
         "name" => 'Test name',
         "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
@@ -332,7 +332,7 @@ subtest 'Update a document - typed arrays' => sub {
     is(scalar @{$obj->labels}, 6, 'New items can be retrieved');
     is(ref $obj->labels->[3], 'MTest::Label', 'Retrieved object has correct type');
 
-    is_deeply($obj->doc, {
+    is_deeply($obj->{doc}, {
         "_id" => $id,
         "name" => 'Test name',
         "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
@@ -362,7 +362,7 @@ subtest 'Update a document - objects' => sub {
     $obj->load($id);
     is($obj->hasChanges, 0, 'Loaded document has no changes');
 
-    is_deeply($obj->doc, {
+    is_deeply($obj->{doc}, {
         "_id" => $id,
         "name" => 'Test name',
         "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
@@ -394,7 +394,7 @@ subtest 'Updating dupliacted data' => sub {
     $obj->load($id);
     is($obj->hasChanges, 0, 'Loaded document has no changes');
 
-    is_deeply($obj->doc, {
+    is_deeply($obj->{doc}, {
         "_id" => $id,
         "name" => 'Test name',
         "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
@@ -434,7 +434,7 @@ subtest 'Identify correct document type in array' => sub {
     $obj->load($id);
     is($obj->hasChanges, 0, 'Loaded document has no changes');
 
-    is_deeply($obj->doc, {
+    is_deeply($obj->{doc}, {
         "_id" => $id,
         "name" => 'Test name',
         "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
@@ -464,7 +464,7 @@ subtest 'Identify correct document type in array' => sub {
     is(ref $obj->multi->[0], 'MTest::Label', 'First object is correct type');
     is(ref $obj->multi->[1], 'MTest::Meta', 'Second object is correct type');
 
-    is_deeply($obj->doc, {
+    is_deeply($obj->{doc}, {
         "_id" => $id,
         "name" => 'Test name',
         "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
