@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-use Test::More tests => 9;
+use Test::More tests => 11;
 
 use strict;
 use warnings;
@@ -383,4 +383,105 @@ subtest 'Update a document - objects' => sub {
     $obj->save;
     $obj->load($id);
     is($obj->metadata->type, 'new meta type', 'String inside object is updated');
+};
+
+subtest 'Updating dupliacted data' => sub {
+    plan tests => 4;
+
+    my ($id, $dt, $meta, $label) = makeNewObject;
+
+    my $obj = new MTest(client => $client);
+    $obj->load($id);
+    is($obj->hasChanges, 0, 'Loaded document has no changes');
+
+    is_deeply($obj->doc, {
+        "_id" => $id,
+        "name" => 'Test name',
+        "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+        "available" => true,
+        "attr" => { key1 => 'key 1', key2 => 'key 2' },
+        "tags" => ['tag1', 'tag2'],
+        "metadata" => {
+            "type" => 'meta type'
+        },
+        "labels" => [
+            {
+                "text" => 'test label'
+            }
+        ]
+    }, 'Correct document returned by MongoDB driver');
+
+    my $dup = new MTest::Duplicate(client => $client);
+    $dup->item_id({'$ref' => 'items', '$id' => $id});
+    $dup->name('Test name');
+    my $dup_id = $dup->save;
+
+    isa_ok($dup_id, 'MongoDB::OID', 'Duplicate object returned id');
+
+    $obj->name('New name');
+    $obj->save;
+
+    $dup->load($id);
+    is($dup->name, 'New name', 'Name in duplicate data has changed');
+};
+
+subtest 'Identify correct document type in array' => sub {
+    plan tests => 6;
+
+    my ($id, $dt, $meta, $label) = makeNewObject;
+
+    my $obj = new MTest(client => $client);
+    $obj->load($id);
+    is($obj->hasChanges, 0, 'Loaded document has no changes');
+
+    is_deeply($obj->doc, {
+        "_id" => $id,
+        "name" => 'Test name',
+        "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+        "available" => true,
+        "attr" => { key1 => 'key 1', key2 => 'key 2' },
+        "tags" => ['tag1', 'tag2'],
+        "metadata" => {
+            "type" => 'meta type'
+        },
+        "labels" => [
+            {
+                "text" => 'test label'
+            }
+        ]
+    }, 'Correct document returned by MongoDB driver');
+
+    my $label = new MTest::Label;
+    $label->text('Label test');
+    my $meta = new MTest::Meta;
+    $meta->type('Meta test');
+    push $obj->multi, $label, $meta;
+
+    $obj->save;
+    $obj->load($id);
+
+    is(scalar @{$obj->multi}, 2, 'Both objects were saved in array');
+    is(ref $obj->multi->[0], 'MTest::Label', 'First object is correct type');
+    is(ref $obj->multi->[1], 'MTest::Meta', 'Second object is correct type');
+
+    is_deeply($obj->doc, {
+        "_id" => $id,
+        "name" => 'Test name',
+        "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+        "available" => true,
+        "attr" => { key1 => 'key 1', key2 => 'key 2' },
+        "tags" => ['tag1', 'tag2'],
+        "metadata" => {
+            "type" => 'meta type'
+        },
+        "labels" => [
+            {
+                "text" => 'test label'
+            }
+        ],
+        "multi" => [
+            { "text" => 'Label test' },
+            { "type" => 'Meta test' },
+        ],
+    }, 'Correct document returned by MongoDB driver');
 };

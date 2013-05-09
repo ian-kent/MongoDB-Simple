@@ -9,7 +9,7 @@ use DateTime;
 use DateTime::Format::W3CDTF;
 use MongoDB::Simple::ArrayType;
 use Data::Dumper;
-our @EXPORT = qw/ collection string date array object parent dbref boolean oid database /;
+our @EXPORT = qw/ collection string date array object parent dbref boolean oid database locator matches /;
 
 has 'client'; # stores the client (or can be passed in)
 has 'db'; # stores the database (or can be passed in)
@@ -17,6 +17,7 @@ has 'col'; # stores the collection (or can be passed in)
 has 'meta'; # stores the keyword metadata
 has 'doc'; # stores the document
 has 'changes'; # stores changes made since load/save
+has 'callbacks'; # stores callbacks needed for changes
 has 'parent'; # stores the parent object
 has 'objcache'; # stores created objects
 has 'arraycache'; # stores array objects
@@ -80,6 +81,7 @@ sub new {
         $self->doc({});
     }
     $self->changes({});
+    $self->callbacks([]);
     $self->objcache({});
     $self->arraycache({});
     $self->existsInDb(0);
@@ -117,7 +119,7 @@ sub load {
     #my ($self, $id) = @_;
     my $self = shift;
 
-    my $doc = $self->col->find_one($self->locator(@_));
+    my $doc = $self->col->find_one($self->getLocator(@_));
 
     if(!$doc) {
         Mojo::Exception->throw("Failed to load document with id: @_");
@@ -126,13 +128,20 @@ sub load {
     $self->existsInDb(1);
     $self->doc($doc);
     $self->changes({});
+    $self->callbacks([]);
     $self->objcache({});
     $self->arraycache({});
 }
 
 # Can be overridden ($self, @args) to provide a different matching mechanism
-sub locator {
+# better to use locator sub {}
+sub getLocator {
     my ($self, $id) = @_;
+
+    if($self->meta->{locator}) {
+        my $loc = $self->meta->{locator};
+        return &$loc($self, $id);
+    }
 
     if(ref($id) !~ /HASH/) {
         return {
@@ -153,8 +162,14 @@ sub save {
             $self->log("No updates found, not saving");
             return 0;
         }
-        $self->log("Exists in db, locator: " . $self->locator);
-        $self->col->update($self->locator, $self->getUpdates);
+        $self->log("Exists in db, locator: " . $self->getLocator);
+        $self->col->update($self->getLocator, $updates);
+        $self->changes({});
+        # TODO callbacks
+        for my $cb (@{$self->callbacks}) {
+            &$cb;
+        }
+        $self->callbacks([]);
     } else {
         my $changes = $self->changes;
         $self->log("nSave:: changes:");
@@ -162,6 +177,8 @@ sub save {
         $self->log("Doesn't exist in db");
         my $id = $self->col->insert($changes);
         $self->existsInDb(1);
+        $self->changes({});
+        $self->callbacks([]);
         $self->log(Dumper $id);
         return $id;
     }
@@ -208,7 +225,7 @@ sub getUpdates {
                 my $mtype = $types{$type}; 
                 for my $chg (@{$chng->{$type}}) {
                     $changes{$mtype}{$field} = [] if !$changes{$mtype}{"$field"};
-                    if($self->meta->{fields}->{$field}->{args}->{type}) {
+                    if($self->meta->{fields}->{$field}->{args}->{type} || $self->meta->{fields}->{$field}->{args}->{types}) {
                         push @{$changes{$mtype}{"$field"}}, $chg->doc;
                     } else {
                         push @{$changes{$mtype}{"$field"}}, $chg;
@@ -235,6 +252,16 @@ sub dump {
 # Accessor methods                                                             #
 ################################################################################
 
+sub lookForCallbacks {
+    my ($self, $field, $value) = @_;
+
+    if($self->meta->{fields}->{$field}->{args}->{changed}) {
+        push $self->callbacks, sub {
+            my $cb = $self->meta->{fields}->{$field}->{args}->{changed};
+            &$cb($self, $value);
+        };
+    }
+}
 sub defaultAccessor {
     my ($self, $field, $value) = @_;
 
@@ -247,6 +274,8 @@ sub defaultAccessor {
     $self->changes->{$field} = $value;
     # XXX unsure if we want to set doc or not.... if we do, it makes insert/upsert easier
     $self->doc->{$field} = $value;
+
+    $self->lookForCallbacks($field, $value);
 }
 
 sub stringAccessor {
@@ -273,6 +302,8 @@ sub dateAccessor {
     $self->changes->{$field} = $value;
     # XXX unsure if we want to set doc or not.... if we do, it makes insert/upsert easier
     $self->doc->{$field} = $value;
+
+    $self->lookForCallbacks($field, $value);
 }
 sub arrayAccessor {
     my ($self, $field, $value) = @_;
@@ -287,8 +318,25 @@ sub arrayAccessor {
         if($docval) {
             for my $item (@$docval) {
                 my $type = $self->meta->{fields}->{$field}->{args}->{type};
+                my $types = $self->meta->{fields}->{$field}->{args}->{types};
                 if($type) {
                     push @arr, $type->new(parent => $self, doc => $item);
+                } elsif ($types) {
+                    my $matched = 0;
+                    for my $type (@$types) {
+                        if($metadata{$type}->{matches}) {
+                            my $matcher = $metadata{$type}->{matches};
+                            my $matches = &$matcher($item);
+                            if($matches) {
+                                push @arr, $type->new(parent => $self, doc => $item);
+                                $matched = 1;
+                                last;
+                            }
+                        }
+                    }
+                    if(!$matched) {
+                        Mojo::Exception->throw('No type matched current document');
+                    }
                 } else {
                     push @arr, $item;
                 }
@@ -319,6 +367,8 @@ sub arrayAccessor {
     $self->changes->{$field} = $value;
     # XXX unsure if we want to set doc or not.... if we do, it makes insert/upsert easier
     $self->doc->{$field} = $value;
+
+    $self->lookForCallbacks($field, $value);
 }
 sub objectAccessor {
     my ($self, $field, $value) = @_;
@@ -351,7 +401,7 @@ sub objectAccessor {
     # XXX unsure if we want to set doc or not.... if we do, it makes insert/upsert easier
     $self->doc->{$field} = $value;
 
-    return;
+    $self->lookForCallbacks($field, $value);
 } 
 sub dbrefAccessor {
     return defaultAccessor(@_);
@@ -402,6 +452,16 @@ sub oid {
 # Keywords                                                                     #
 ################################################################################
 
+sub locator {
+    my ($locator) = @_;
+    addmeta("locator", $locator);
+}
+
+sub matches {
+    my ($matches) = @_;
+    addmeta("matches", $matches);
+}
+
 sub database {
     my ($database) = @_;
     addmeta("database", $database);
@@ -423,16 +483,14 @@ sub parent {
 }
 
 sub string {
-    my ($key, $value) = @_;
-    $value = '<undef>' if !defined $value;
-    addfieldmeta($key, { type => 'string', value => $value });
+    my ($key, $args) = @_;
+    addfieldmeta($key, { type => 'string', args => $args });
     #print STDERR "MongoDB:: string '$key' => $value\n";
 }
 
 sub date {
-    my ($key, $value) = @_;
-    $value = '<undef>' if !defined $value;
-    addfieldmeta($key, { type => 'date', value => $value });
+    my ($key, $args) = @_;
+    addfieldmeta($key, { type => 'date', args => $args });
     #print STDERR "MongoDB:: date '$key' => $value\n";
 }
 
@@ -446,9 +504,8 @@ sub dbref {
 }
 
 sub boolean {
-    my ($key, $value) = @_;
-    $value = '<undef>' if !defined $value;
-    addfieldmeta($key, { type => 'boolean', value => $value });
+    my ($key, $args) = @_;
+    addfieldmeta($key, { type => 'boolean', args => $args });
     #print STDERR "MongoDB:: boolean '$key' => $value\n";
 }
 
@@ -464,6 +521,8 @@ sub object {
     #print STDERR "MongoDB:: object '$key' => { type => '$args->{type}' }\n";
 }
 
+    my ($self, @args) = @_;
+
 =head1 NAME
 
 MongoDB::Simple
@@ -477,23 +536,43 @@ MongoDB::Simple
     database 'dbname';
     collection 'collname';
 
-    string 'stringfield';
+    string 'stringfield' => {
+        "changed" => sub {
+            my ($self, $value) = @_;
+            # ... called when changes to 'stringfield' are saved in database
+        }
+    };
     date 'datefield';
     boolean 'booleanfield';
     object 'objectfield';
     array 'arrayfield';
     object 'typedobject' => { type => 'My::Data::Class::Foo' };
     array 'typedarray' => { type => 'My::Data::Class::Bar' };
+    array 'multiarray' => { types => ['My::Data::Class::Foo', 'My::Data::Class::Bar'] };
 
     package My::Data::Class::Foo;
 
     parent type => 'My::Data::Class', key => 'typedobject';
+
+    matches sub {
+        my ($doc) = @_;
+        my %keys = map { $_ => 1 } keys %$doc;
+        return 1 if (scalar keys %keys == 1) && $keys{fooname};
+        return 0;
+    }
 
     string 'fooname';
 
     package My::Data::Class::Bar;
 
     parent type => 'My::Data::Class', key => 'typedarray';
+
+    matches sub {
+        my ($doc) = @_;
+        my %keys = map { $_ => 1 } keys %$doc;
+        return 1 if (scalar keys %keys == 1) && $keys{barname};
+        return 0;
+    }
 
     string 'barname';
 

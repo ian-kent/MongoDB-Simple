@@ -67,9 +67,21 @@ sub PUSH      {
     for(my $i = 0; $i < scalar @_; $i++) {
         my $obj = $_[$i];
 
-        if($self->meta->{args}->{type}) {
+        if(ref $obj eq 'HASH' && ($self->meta->{args}->{type} || $self->meta->{args}->{types})) {
             my $type = $self->meta->{args}->{type};
-            if(ref($obj) ne $type) {
+            my $types = $self->meta->{args}->{types};
+            if($types) {
+                for my $type (@$types) {
+                    last if $type eq ref($obj);
+                    if($MongoDB::Simple::metadata{$type}->{matches}) {
+                        my $matcher = $MongoDB::Simple::metadata{$type}->{matches};
+                        my $matches = &$matcher($obj);
+                        if($matches) {
+                            $obj = $type->new(parent => $self->parent, doc => $obj);
+                        }
+                    }
+                }
+            } elsif(ref($obj) ne $type && $type) {
                 $obj = $type->new(parent => $self->parent, doc => $obj);
             } else {
                 $obj->parent($self->parent);
