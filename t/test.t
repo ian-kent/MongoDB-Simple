@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-use Test::More tests => 12;
+use Test::More;
 use Test::Warn;
 
 use strict;
@@ -14,10 +14,27 @@ use MongoDB::Simple qw/ oid /;
 use MongoDB::Simple::Test;
 use boolean;
 
-my $client = MongoDB::MongoClient->new;
+# Make sure we have mongodb installed, otherwise skip all tests
+my $client;
+eval {
+    my $host = "localhost";
+    if (exists $ENV{MONGOD}) {
+        $host = $ENV{MONGOD};
+    }
+    $client = MongoDB::MongoClient->new(host => $host, ssl => $ENV{MONGO_SSL});
+};
+
+if ($@) {
+    plan skip_all => $@;
+}
+else {
+    plan tests => 12;
+}
+
 my $db = $client->get_database('mtest');
 $db->drop if $db;
 
+# Helper method to create a new object
 sub makeNewObject {
     my $obj = new MongoDB::Simple::Test(client => $client);
 
@@ -582,11 +599,11 @@ subtest 'Identify correct document type in array' => sub {
         ]
     }, 'Correct document returned by MongoDB driver');
 
-    my $label = new MongoDB::Simple::Test::Label;
-    $label->text('Label test');
-    my $meta = new MongoDB::Simple::Test::Meta;
-    $meta->type('Meta test');
-    push $obj->multi, $label, $meta;
+    my $label1 = new MongoDB::Simple::Test::Label;
+    $label1->text('Label test');
+    my $meta1 = new MongoDB::Simple::Test::Meta;
+    $meta1->type('Meta test');
+    push $obj->multi, $label1, $meta1;
 
     $obj->save;
     $obj->load($id);
