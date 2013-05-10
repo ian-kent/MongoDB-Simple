@@ -1,4 +1,4 @@
-package MTest;
+package MongoDB::Simple::Test;
 
 use MongoDB::Simple;
 our @ISA = ('MongoDB::Simple');
@@ -10,7 +10,7 @@ string 'name'        => {
     changed => sub {
         my ($self, $value) = @_;
         eval {
-            my $obj = new MTest::Duplicate(client => $self->{client});
+            my $obj = new MongoDB::Simple::Test::Duplicate(client => $self->{client});
             $obj->load($self->{doc}->{_id});
             $obj->name($value);
             $obj->save;
@@ -21,18 +21,18 @@ date 'created'       => undef;
 boolean 'available'  => undef;
 object 'attr'        => undef;
 array 'tags'         => undef;
-object 'metadata'    => { type => 'MTest::Meta' };
-array 'labels'       => { type => 'MTest::Label' };
-array 'multi'        => { types => [ 'MTest::Meta', 'MTest::Label' ] };
+object 'metadata'    => { type => 'MongoDB::Simple::Test::Meta' };
+array 'labels'       => { type => 'MongoDB::Simple::Test::Label' };
+array 'multi'        => { types => [ 'MongoDB::Simple::Test::Meta', 'MongoDB::Simple::Test::Label' ] };
 
 ################################################################################
 
-package MTest::Meta;
+package MongoDB::Simple::Test::Meta;
 
 use MongoDB::Simple;
 our @ISA = ('MongoDB::Simple');
 
-#parent type => 'MTest', key => 'metadata';
+#parent type => 'MongoDB::Simple::Test', key => 'metadata';
 
 matches sub {
     my ($doc) = @_;
@@ -45,12 +45,12 @@ string 'type'  => undef;
 
 ################################################################################
 
-package MTest::Label;
+package MongoDB::Simple::Test::Label;
 
 use MongoDB::Simple;
 our @ISA = ('MongoDB::Simple');
 
-#parent type => 'MTest', key => 'labels';
+#parent type => 'MongoDB::Simple::Test', key => 'labels';
 
 matches sub {
     my ($doc) = @_;
@@ -63,7 +63,7 @@ string 'text'  => undef;
 
 ################################################################################
 
-package MTest::Duplicate;
+package MongoDB::Simple::Test::Duplicate;
 
 use MongoDB::Simple;
 our @ISA = ('MongoDB::Simple');

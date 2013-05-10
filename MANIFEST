@@ -1,0 +1,7 @@
+lib/MongoDB/Simple.pm
+lib/MongoDB/Simple/ArrayType.pm
+lib/MongoDB/Simple/Test.pm
+t/test.t
+README
+Makefile.PL
+MANIFEST

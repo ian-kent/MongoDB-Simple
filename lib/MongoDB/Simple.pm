@@ -1,5 +1,9 @@
 package MongoDB::Simple;
 
+use strict;
+use warnings;
+our $VERSION = '0.001';
+
 use Exporter;
 our @EXPORT = qw/ collection string date array object parent dbref boolean oid database locator matches /;
 
@@ -13,14 +17,13 @@ use Data::Dumper;
 
 our %metadata = (); # internal metadata cache used for all packages
 
-################################################################################
-# Setup some MongoDB magic                                                     #
-################################################################################
-#
-# Lets us cast MongoDB results into classes
-# my $obj = db->coll->find_one({criteria})->as('ClassName');
-#
 {
+    # Setup some MongoDB magic
+    #
+    # Lets us cast MongoDB results into classes
+    #     my $obj = db->coll->find_one({criteria})->as('ClassName');
+    #     my $obj = $cursor->next->as('ClassName');
+
     no strict 'refs';
     no warnings 'redefine';
 
@@ -67,6 +70,8 @@ sub new {
         'arraycache'    => {}, # stores array objects
         'existsInDb'    => 0,
         'debugMode'     => 0,
+        'forceUnshiftOperator' => 0, # forces implementation of unshift to work as expected
+        'warnOnUnshiftOperator' => 1, # enables a warning when unshift is used against an array without forceUnshiftOperator
         %args
     }, $class;
 

@@ -1,6 +1,7 @@
 #!/usr/bin/perl
 
-use Test::More tests => 11;
+use Test::More tests => 12;
+use Test::Warn;
 
 use strict;
 use warnings;
@@ -10,7 +11,7 @@ use MongoDB;
 use DateTime;
 use DateTime::Duration;
 use MongoDB::Simple qw/ oid /;
-use MTest;
+use MongoDB::Simple::Test;
 use boolean;
 
 my $client = MongoDB::MongoClient->new;
@@ -18,12 +19,12 @@ my $db = $client->get_database('mtest');
 $db->drop if $db;
 
 sub makeNewObject {
-    my $obj = new MTest(client => $client);
+    my $obj = new MongoDB::Simple::Test(client => $client);
 
     my $dt = shift || DateTime->now;
-    my $meta = new MTest::Meta;
+    my $meta = new MongoDB::Simple::Test::Meta;
     $meta->type('meta type');
-    my $label = new MTest::Label;
+    my $label = new MongoDB::Simple::Test::Label;
     $label->text('test label');
 
     $obj->name('Test name');
@@ -43,19 +44,19 @@ subtest 'MongoDB methods' => sub {
 
     my ($id, $dt, $meta, $label) = makeNewObject;
 
-    my $obj = $db->get_collection('items')->find_one({'_id' => $id})->as('MTest');
+    my $obj = $db->get_collection('items')->find_one({'_id' => $id})->as('MongoDB::Simple::Test');
 #    my $obj = $db->get_collection('items')->find_one({'_id' => $id});
-    isa_ok($obj, 'MTest', 'Object returned by find_one');
+    isa_ok($obj, 'MongoDB::Simple::Test', 'Object returned by find_one');
 
     my $cursor = $db->get_collection('items')->find;
-    my $obj2 = $cursor->next->as('MTest');
-    isa_ok($obj2, 'MTest', 'Object returned by cursor');
+    my $obj2 = $cursor->next->as('MongoDB::Simple::Test');
+    isa_ok($obj2, 'MongoDB::Simple::Test', 'Object returned by cursor');
 };
 
 subtest 'Object methods' => sub {
     plan tests => 8;
 
-    my $obj = new_ok('MTest');
+    my $obj = new_ok('MongoDB::Simple::Test');
     isa_ok($obj, 'MongoDB::Simple');
 
     # Has methods from MongoDB::Simple
@@ -80,7 +81,7 @@ subtest 'Object methods' => sub {
 subtest 'Accessors' => sub {
     plan tests => 14;
 
-    my $obj = new MTest;
+    my $obj = new MongoDB::Simple::Test;
 
     is($obj->name, undef, 'String is undef');
     $obj->name('Test name');
@@ -99,13 +100,13 @@ subtest 'Accessors' => sub {
     is(scalar @{$obj->tags}, 0, 'Array length is zero');
 
     is($obj->metadata, undef, 'Object is undef');
-    my $meta = new MTest::Meta;
+    my $meta = new MongoDB::Simple::Test::Meta;
     $obj->metadata($meta);
     is($obj->metadata, $meta, 'Object has been changed');
 
     like(ref($obj->labels), qr/ARRAY/, 'Array is array reference');
     is(scalar @{$obj->labels}, 0, 'Array length is zero');
-    my $label = new MTest::Label;
+    my $label = new MongoDB::Simple::Test::Label;
     push $obj->labels, $label;
     is(scalar @{$obj->labels}, 1, 'Array length is 1');
     is($obj->labels->[0], $label, 'Array contains object');
@@ -142,7 +143,7 @@ subtest 'Fetch a document' => sub {
 
     my ($id, $dt, $meta, $label) = makeNewObject;
 
-    my $obj = new MTest(client => $client);
+    my $obj = new MongoDB::Simple::Test(client => $client);
     $obj->load($id);
     is($obj->hasChanges, 0, 'Loaded document has no changes');
 
@@ -171,8 +172,8 @@ subtest 'Fetch a document' => sub {
     is($obj->tags->[1], 'tag2', 'Array item[1] retrieved');
     is_deeply($obj->metadata->{doc}, $meta->{doc}, 'Object retrieved');
     is($obj->metadata->type, 'meta type', 'Object property retrieved');
-    is(ref $obj->metadata, 'MTest::Meta', 'Typed object retrieved');
-    is(ref $obj->labels->[0], 'MTest::Label', 'Typed array item[0] retrieved');
+    is(ref $obj->metadata, 'MongoDB::Simple::Test::Meta', 'Typed object retrieved');
+    is(ref $obj->labels->[0], 'MongoDB::Simple::Test::Label', 'Typed array item[0] retrieved');
     is($obj->labels->[0]->text, 'test label', 'Typed array item[0] string retrieved');
     is_deeply($obj->attr, { key1 => 'key 1', key2 => 'key 2' }, 'Anonymous object retrieved');
 };
@@ -182,7 +183,7 @@ subtest 'Update a document - scalars' => sub {
 
     my ($id, $dt, $meta, $label) = makeNewObject;
 
-    my $obj = new MTest(client => $client);
+    my $obj = new MongoDB::Simple::Test(client => $client);
     $obj->load($id);
     is($obj->hasChanges, 0, 'Loaded document has no changes');
 
@@ -246,7 +247,7 @@ subtest 'Update a document - scalar arrays' => sub {
 
     my ($id, $dt, $meta, $label) = makeNewObject;
 
-    my $obj = new MTest(client => $client);
+    my $obj = new MongoDB::Simple::Test(client => $client);
     $obj->load($id);
     is($obj->hasChanges, 0, 'Loaded document has no changes');
 
@@ -292,12 +293,138 @@ subtest 'Update a document - scalar arrays' => sub {
     }, 'Correct document returned by MongoDB driver');
 };
 
+subtest 'Update a document - scalar array operators' => sub {
+    plan tests => 9;
+
+    my ($id, $dt, $meta, $label) = makeNewObject;
+    my $obj = new MongoDB::Simple::Test(client => $client);
+    $obj->load($id);
+    push $obj->tags, 'Push test';
+    $obj->save;
+    $obj->load($id);
+    is_deeply($obj->{doc}, {
+        "_id" => $id,
+        "name" => 'Test name',
+        "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+        "available" => true,
+        "attr" => { key1 => 'key 1', key2 => 'key 2' },
+        "tags" => ['tag1', 'tag2', 'Push test'],
+        "metadata" => {
+            "type" => 'meta type'
+        },
+        "labels" => [
+            {
+                "text" => 'test label'
+            }
+        ]
+    }, 'Correct document returned by MongoDB driver');
+
+ 
+    # Tests the behaviour that unshift actually implements
+    # i.e., that unshift behaves like push
+    ($id, $dt, $meta, $label) = makeNewObject;
+    $obj->load($id);
+    warning_is { unshift $obj->tags, 'Unshift test'; } 'unshift on MongoDB::Simple::ArrayType behaves like push', 'Use of unshift without forceUnshiftOperator generates warning';
+    $obj->save;
+    $obj->load($id);
+    is_deeply($obj->{doc}, {
+        "_id" => $id,
+        "name" => 'Test name',
+        "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+        "available" => true,
+        "attr" => { key1 => 'key 1', key2 => 'key 2' },
+        "tags" => ['tag1', 'tag2', 'Unshift test'],
+        "metadata" => {
+            "type" => 'meta type'
+        },
+        "labels" => [
+            {
+                "text" => 'test label'
+            }
+        ]
+    }, 'Correct document returned by MongoDB driver');
+
+    $obj->{warnOnUnshiftOperator} = 0;
+    warning_is { unshift $obj->tags, 'Unshift test'; } undef, 'Use of unshift with warnOnUnshiftOperator disabled generates no warnings';
+    $obj->{warnOnUnshiftOperator} = 1;
+
+    # Test the force array unshift option, which basically rewrites the
+    # entire array in mongodb to get the item at the start
+    ($id, $dt, $meta, $label) = makeNewObject;
+    $obj->load($id);
+    $obj->{forceUnshiftOperator} = 1;
+    unshift $obj->tags, 'Unshift test';
+    $obj->save;
+    $obj->{forceUnshiftOperator} = 0;
+    $obj->load($id);
+    is_deeply($obj->{doc}, {
+        "_id" => $id,
+        "name" => 'Test name',
+        "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+        "available" => true,
+        "attr" => { key1 => 'key 1', key2 => 'key 2' },
+        "tags" => ['Unshift test', 'tag1', 'tag2'],
+        "metadata" => {
+            "type" => 'meta type'
+        },
+        "labels" => [
+            {
+                "text" => 'test label'
+            }
+        ]
+    }, 'Correct document returned by MongoDB driver');
+    
+    ($id, $dt, $meta, $label) = makeNewObject;
+    $obj->load($id);
+    my $tag = pop $obj->tags;
+    $obj->save;
+    $obj->load($id);
+    is($tag, 'tag2', 'Correct tag popped off array');
+    is_deeply($obj->{doc}, {
+        "_id" => $id,
+        "name" => 'Test name',
+        "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+        "available" => true,
+        "attr" => { key1 => 'key 1', key2 => 'key 2' },
+        "tags" => ['tag1'],
+        "metadata" => {
+            "type" => 'meta type'
+        },
+        "labels" => [
+            {
+                "text" => 'test label'
+            }
+        ]
+    }, 'Correct document returned by MongoDB driver');
+
+    my $tag2 = shift $obj->tags;
+    $obj->save;
+    $obj->load($id);
+    is($tag2, 'tag1', 'Correct tag shifted from array');
+    is_deeply($obj->{doc}, {
+        "_id" => $id,
+        "name" => 'Test name',
+        "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+        "available" => true,
+        "attr" => { key1 => 'key 1', key2 => 'key 2' },
+        "tags" => ['tag2'],
+        "metadata" => {
+            "type" => 'meta type'
+        },
+        "labels" => [
+            {
+                "text" => 'test label'
+            }
+        ]
+    }, 'Correct document returned by MongoDB driver');
+};
+
 subtest 'Update a document - typed arrays' => sub {
     plan tests => 7;
 
     my ($id, $dt, $meta, $label) = makeNewObject;
 
-    my $obj = new MTest(client => $client);
+    my $obj = new MongoDB::Simple::Test(client => $client);
     $obj->load($id);
     is($obj->hasChanges, 0, 'Loaded document has no changes');
 
@@ -320,7 +447,7 @@ subtest 'Update a document - typed arrays' => sub {
 
     my @labels = ();
     for(my $i = 0; $i < 5; $i++) { 
-        my $l = new MTest::Label;
+        my $l = new MongoDB::Simple::Test::Label;
         $l->text('Label ' . ($i+1));
         push @labels, $l;
     }
@@ -330,7 +457,7 @@ subtest 'Update a document - typed arrays' => sub {
     $obj->load($id);
     is($obj->hasChanges, 0, 'Loaded document has no changes');
     is(scalar @{$obj->labels}, 6, 'New items can be retrieved');
-    is(ref $obj->labels->[3], 'MTest::Label', 'Retrieved object has correct type');
+    is(ref $obj->labels->[3], 'MongoDB::Simple::Test::Label', 'Retrieved object has correct type');
 
     is_deeply($obj->{doc}, {
         "_id" => $id,
@@ -358,7 +485,7 @@ subtest 'Update a document - objects' => sub {
 
     my ($id, $dt, $meta, $label) = makeNewObject;
 
-    my $obj = new MTest(client => $client);
+    my $obj = new MongoDB::Simple::Test(client => $client);
     $obj->load($id);
     is($obj->hasChanges, 0, 'Loaded document has no changes');
 
@@ -390,7 +517,7 @@ subtest 'Updating dupliacted data' => sub {
 
     my ($id, $dt, $meta, $label) = makeNewObject;
 
-    my $obj = new MTest(client => $client);
+    my $obj = new MongoDB::Simple::Test(client => $client);
     $obj->load($id);
     is($obj->hasChanges, 0, 'Loaded document has no changes');
 
@@ -411,7 +538,7 @@ subtest 'Updating dupliacted data' => sub {
         ]
     }, 'Correct document returned by MongoDB driver');
 
-    my $dup = new MTest::Duplicate(client => $client);
+    my $dup = new MongoDB::Simple::Test::Duplicate(client => $client);
     $dup->item_id({'$ref' => 'items', '$id' => $id});
     $dup->name('Test name');
     my $dup_id = $dup->save;
@@ -430,7 +557,7 @@ subtest 'Identify correct document type in array' => sub {
 
     my ($id, $dt, $meta, $label) = makeNewObject;
 
-    my $obj = new MTest(client => $client);
+    my $obj = new MongoDB::Simple::Test(client => $client);
     $obj->load($id);
     is($obj->hasChanges, 0, 'Loaded document has no changes');
 
@@ -451,9 +578,9 @@ subtest 'Identify correct document type in array' => sub {
         ]
     }, 'Correct document returned by MongoDB driver');
 
-    my $label = new MTest::Label;
+    my $label = new MongoDB::Simple::Test::Label;
     $label->text('Label test');
-    my $meta = new MTest::Meta;
+    my $meta = new MongoDB::Simple::Test::Meta;
     $meta->type('Meta test');
     push $obj->multi, $label, $meta;
 
@@ -461,8 +588,8 @@ subtest 'Identify correct document type in array' => sub {
     $obj->load($id);
 
     is(scalar @{$obj->multi}, 2, 'Both objects were saved in array');
-    is(ref $obj->multi->[0], 'MTest::Label', 'First object is correct type');
-    is(ref $obj->multi->[1], 'MTest::Meta', 'Second object is correct type');
+    is(ref $obj->multi->[0], 'MongoDB::Simple::Test::Label', 'First object is correct type');
+    is(ref $obj->multi->[1], 'MongoDB::Simple::Test::Meta', 'Second object is correct type');
 
     is_deeply($obj->{doc}, {
         "_id" => $id,

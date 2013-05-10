@@ -1,5 +1,9 @@
 package MongoDB::Simple::ArrayType;
 
+use strict;
+use warnings;
+our $VERSION = '0.001';
+
 use Tie::Array;
 our @ISA = ('Tie::Array');
 
@@ -23,7 +27,6 @@ sub new {
 }
 
 sub TIEARRAY  { 
-    use Data::Dumper;
     my $class = shift;
     return $class->new(@_);
 }
@@ -110,21 +113,40 @@ sub SHIFT     {
 }
 sub UNSHIFT   { 
     my $self = shift;
-    $self->{parent}->log("ArrayType::UNSHIFT");
 
-    for my $obj (@_) {
-        my $value = $obj;
-        my $class = ref $obj;
-        if($class && $class !~ /HASH/) {
-            $value = $obj->{doc};
+    unless($self->{parent}->{forceUnshiftOperator}) {
+        # mongodb doesn't provide an $unshift operator
+        # we can still get the item onto the array using push
+        # but it appears at the end... the alternative is completely
+        # rewriting the array in the right order...
+        # FIXME consider adding configurable option to force unshift to work
+        if($self->{parent}->{warnOnUnshiftOperator}) {
+            warn "unshift on MongoDB::Simple::ArrayType behaves like push";
         }
-        unshift @{$self->{parent}->{changes}->{$self->{field}}}, $value;
-        unshift @{$self->{parent}->{doc}->{$self->{field}}}, $value;
+        $self->{parent}->log("ArrayType::UNSHIFT (forceUnshiftOperator => 0)");
+        return PUSH($self, @_);
     }
 
-    $self->{changes}->{'$push'} = [] if !$self->{changes}->{'$push'};
-    unshift $self->{changes}->{'$push'}, @_;
-    unshift(@{$self->{array}},@_);
+    # forceUnshiftOperator is set, so we'll trick mongodb into performing
+    # an unshift by rewriting the entire array
+
+    # TODO
+
+    $self->{parent}->log("ArrayType::UNSHIFT (forceUnshiftOperator => 1)");
+
+    #for my $obj (@_) {
+    #    my $value = $obj;
+    #    my $class = ref $obj;
+    #    if($class && $class !~ /HASH/) {
+    #        $value = $obj->{doc};
+    #    }
+    #    unshift @{$self->{parent}->{changes}->{$self->{field}}}, $value;
+    #    unshift @{$self->{parent}->{doc}->{$self->{field}}}, $value;
+    #}
+
+    #$self->{changes}->{'$push'} = [] if !$self->{changes}->{'$push'};
+    #unshift $self->{changes}->{'$push'}, @_;
+    #unshift(@{$self->{array}},@_);
 }
 sub EXISTS    { 
     my ($self, $index) = @_;
