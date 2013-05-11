@@ -2,7 +2,7 @@ package MongoDB::Simple::ArrayType;
 
 use strict;
 use warnings;
-our $VERSION = '0.004';
+our $VERSION = '0.005';
 
 use Tie::Array;
 our @ISA = ('Tie::Array');
@@ -130,24 +130,50 @@ sub UNSHIFT   {
     # forceUnshiftOperator is set, so we'll trick mongodb into performing
     # an unshift by rewriting the entire array
 
-    # TODO
-
     $self->{parent}->log("ArrayType::UNSHIFT (forceUnshiftOperator => 1)");
 
-    #for my $obj (@_) {
-    #    my $value = $obj;
-    #    my $class = ref $obj;
-    #    if($class && $class !~ /HASH/) {
-    #        $value = $obj->{doc};
-    #    }
-    #    unshift @{$self->{parent}->{changes}->{$self->{field}}}, $value;
-    #    unshift @{$self->{parent}->{doc}->{$self->{field}}}, $value;
-    #}
+    $self->{changes}->{'$unshift'} = [] if !$self->{changes}->{'$unshift'};
 
-    #$self->{changes}->{'$push'} = [] if !$self->{changes}->{'$push'};
-    #unshift $self->{changes}->{'$push'}, @_;
-    #unshift(@{$self->{array}},@_);
+    for(my $i = 0; $i < scalar @_; $i++) {
+        my $obj = $_[$i];
+
+        if(ref $obj eq 'HASH' && ($self->{meta}->{args}->{type} || $self->{meta}->{args}->{types})) {
+            my $type = $self->{meta}->{args}->{type};
+            my $types = $self->{meta}->{args}->{types};
+            if($types) {
+                for my $type (@$types) {
+                    last if $type eq ref($obj);
+                    if($MongoDB::Simple::metadata{$type}->{matches}) {
+                        my $matcher = $MongoDB::Simple::metadata{$type}->{matches};
+                        my $matches = &$matcher($obj);
+                        if($matches) {
+                            $obj = $type->new(parent => $self->{parent}, doc => $obj);
+                        }
+                    }
+                }
+            } elsif(ref($obj) ne $type && $type) {
+                $obj = $type->new(parent => $self->{parent}, doc => $obj);
+            } else {
+                $obj->{parent} = $self->{parent};
+            }
+        }
+
+        my $value = $obj;
+        my $class = ref $obj;
+        if($class && $class !~ /HASH/) {
+            $value = $obj->{doc};
+        }
+
+        # TODO only want to store doc/changes if its a change, not a load
+        unshift @{$self->{parent}->{changes}->{$self->{field}}}, $value;
+        #push @{$self->{parent}->{doc}->{$self->{field}}}, $value;
+        $self->{parent}->log('Adding object $obj to changes->$unshift');
+        push $self->{changes}->{'$unshift'}, $obj;
+
+        unshift @{$self->{array}}, $obj;
+    }
 }
+
 sub EXISTS    { 
     my ($self, $index) = @_;
     $self->{parent}->log("ArrayType::EXISTS index[$index]");

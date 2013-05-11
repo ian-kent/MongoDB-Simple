@@ -163,34 +163,34 @@ subtest 'Update a document - scalar array operators' => sub {
         warning_is { unshift $obj->tags, 'Unshift test'; } undef, 'Use of unshift with warnOnUnshiftOperator disabled generates no warnings';
         $obj->{warnOnUnshiftOperator} = 1;
 
-        TODO: {
-            local $TODO = 'force unshift, pop and shift not implemented';
+        # Test the force array unshift option, which basically rewrites the
+        # entire array in mongodb to get the item at the start
+        ($id, $dt, $meta, $label) = makeNewObject;
+        $obj->load($id);
+        $obj->{forceUnshiftOperator} = 1;
+        unshift $obj->tags, 'Unshift test';
+        $obj->save;
+        $obj->{forceUnshiftOperator} = 0;
+        $obj->load($id);
+        is_deeply($obj->{doc}, {
+            "_id" => $id,
+            "name" => 'Test name',
+            "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+            "available" => true,
+            "attr" => { key1 => 'key 1', key2 => 'key 2' },
+            "tags" => ['Unshift test', 'tag1', 'tag2'],
+            "metadata" => {
+                "type" => 'meta type'
+            },
+            "labels" => [
+                {
+                    "text" => 'test label'
+                }
+            ]
+        }, 'Correct document returned by MongoDB driver after unshift');
 
-            # Test the force array unshift option, which basically rewrites the
-            # entire array in mongodb to get the item at the start
-            ($id, $dt, $meta, $label) = makeNewObject;
-            $obj->load($id);
-            $obj->{forceUnshiftOperator} = 1;
-            unshift $obj->tags, 'Unshift test';
-            $obj->save;
-            $obj->{forceUnshiftOperator} = 0;
-            $obj->load($id);
-            is_deeply($obj->{doc}, {
-                "_id" => $id,
-                "name" => 'Test name',
-                "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
-                "available" => true,
-                "attr" => { key1 => 'key 1', key2 => 'key 2' },
-                "tags" => ['Unshift test', 'tag1', 'tag2'],
-                "metadata" => {
-                    "type" => 'meta type'
-                },
-                "labels" => [
-                    {
-                        "text" => 'test label'
-                    }
-                ]
-            }, 'Correct document returned by MongoDB driver');
+        TODO: {
+            local $TODO = 'pop and shift not implemented';
             
             ($id, $dt, $meta, $label) = makeNewObject;
             $obj->load($id);

@@ -2,7 +2,7 @@ package MongoDB::Simple;
 
 use strict;
 use warnings;
-our $VERSION = '0.004';
+our $VERSION = '0.005';
 
 use Exporter;
 our @EXPORT = qw/ collection string date array object parent dbref boolean oid database locator matches /;
@@ -232,15 +232,26 @@ sub getUpdates {
             my $arr = $self->{arraycache}->{$field}->{objref};
             my $chng = $arr->{changes};
             $self->log(Dumper $chng);
-            my %types = ( '$push' => '$pushAll' );
-            for my $type (keys %types) {
-                my $mtype = $types{$type}; 
-                for my $chg (@{$chng->{$type}}) {
-                    $changes{$mtype}{$field} = [] if !$changes{$mtype}{"$field"};
-                    if($self->{meta}->{fields}->{$field}->{args}->{type} || $self->{meta}->{fields}->{$field}->{args}->{types}) {
-                        push @{$changes{$mtype}{"$field"}}, $chg->{doc};
-                    } else {
-                        push @{$changes{$mtype}{"$field"}}, $chg;
+            my %types = ( 
+                '$push' => '$pushAll',
+            );
+            my $unshift = $chng->{'$unshift'};
+            if($self->{forceUnshiftOperator} && $unshift && scalar @$unshift > 0) { 
+                # we've used $unshift, which doesn't exist, so just add the entire array again to simulate it
+                $self->log(" - unshift found and forceUnshiftOperator set, rewriting array");
+                $changes{'$set'}{"$field"} = $self->$field;
+            } else {
+                $self->log(" - unshift not found or forceUnshiftOperator => 0");
+                # handle fields as normal (i.e. using $remove/$push etc)
+                for my $type (keys %types) {
+                    my $mtype = $types{$type}; 
+                    for my $chg (@{$chng->{$type}}) {
+                        $changes{$mtype}{$field} = [] if !$changes{$mtype}{"$field"};
+                        if($self->{meta}->{fields}->{$field}->{args}->{type} || $self->{meta}->{fields}->{$field}->{args}->{types}) {
+                            push @{$changes{$mtype}{"$field"}}, $chg->{doc};
+                        } else {
+                            push @{$changes{$mtype}{"$field"}}, $chg;
+                        }
                     }
                 }
             }
