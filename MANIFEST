@@ -1,7 +1,11 @@
 lib/MongoDB/Simple.pm
 lib/MongoDB/Simple/ArrayType.pm
 lib/MongoDB/Simple/Test.pm
-t/test.t
+t/simple.t
+t/scalars.t
+t/arrays.t
+t/objects.t
+t/callbacks.t
 README
 Makefile.PL
 MANIFEST

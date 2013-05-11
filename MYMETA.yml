@@ -24,4 +24,4 @@ requires:
   MongoDB: 0.7
   Switch: 2.16
   Tie::Array: 1.04
-version: 0.001
+version: 0.004
