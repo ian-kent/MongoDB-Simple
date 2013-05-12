@@ -69,7 +69,7 @@ sub new {
         'objcache'      => {}, # stores created objects
         'arraycache'    => {}, # stores array objects
         'existsInDb'    => 0,
-        'debugMode'     => 0,
+        'debugMode'     => $ENV{'MONGODB_SIMPLE_DEBUG'} // 0,
         'forceUnshiftOperator' => 0, # forces implementation of unshift to work as expected
         'warnOnUnshiftOperator' => 1, # enables a warning when unshift is used against an array without forceUnshiftOperator
         %args
@@ -164,27 +164,134 @@ sub save {
     my ($self) = @_;
 
     if($self->{existsInDb}) {
-        $self->log("Save:: updates:");
-        my $updates = $self->getUpdates;
-        $self->log(Dumper $updates);
-        if(scalar keys %$updates == 0) {
-            $self->log("No updates found, not saving");
-            return 0;
-        }
+        $self->log("Save::");
         $self->log("Exists in db, locator: " . $self->getLocator);
-        $self->{col}->update($self->getLocator, $updates);
+
+        # We'll update in a particular order
+        $self->log("Changes::");
+        $self->log(Dumper $self->{changes});
+
+        # $set first
+        my $set = {};
+        # First check changes, it contains scalar updates
+        for my $key (keys %{$self->{changes}}) {
+            $self->log(" - adding change to \$set for $key:");
+            $self->log(Dumper $self->{changes}->{$key});
+            $set->{$key} = $self->{changes}->{$key};
+        }
+        # Next loop fields looking for objects
+        for my $field (keys %{$self->{meta}->{fields}}) {
+            $self->log("objects: checking field $field");
+
+            if($self->{meta}->{fields}->{$field}->{type} =~ /object/i) {
+                # Update as an object
+                $self->log(" - field $field is object type");
+                my $obj = $self->$field;
+                # TODO tied hashes - at the moment, hashrefs get fully updated every time
+                my $chng = ref($obj) && ref($obj) !~ /HASH/ ? $obj->{changes} : $obj;
+                $self->log(Dumper $chng);
+                for my $chg (keys %{$chng}) {
+                    $set->{"$field.$chg"} = $chng->{$chg};
+                }
+            }
+
+            if($self->{forceUnshiftOperator} && $self->{meta}->{fields}->{$field}->{type} =~ /array/i && $self->{arraycache}->{$field} && $self->{arraycache}->{$field}->{objref}->{'$unshift'}) {
+                # we have an array which needs unshifting, so just rewrite it
+                $self->log(" - unshift found and forceUnshiftOperator set, rewriting array");
+                $set->{"$field"} = $self->$field;
+            }
+        }
+        # Update the database with the $set changes
+        if(scalar keys %$set > 0) {
+            $self->{col}->update($self->getLocator, {
+                '$set' => $set
+            });
+        }
+
+        # Next loop fields looking for arrays which need updating
+        for my $field (keys %{$self->{meta}->{fields}}) {
+            $self->log("arrays: checking field $field");
+
+            if($self->{meta}->{fields}->{$field}->{type} =~ /array/i) {
+                $self->log(" - field $field is array type");
+                $self->$field; # triggers array initialisation if it hasn't already happened
+
+                # Skip it if we're forcing unshift and we've actually unshifted
+                next if $self->{forceUnshiftOperator} && $self->{arraycache}->{$field} && $self->{arraycache}->{$field}->{objref}->{'$unshift'};
+
+                # Get the array and its changes
+                my $arr = $self->{arraycache}->{$field}->{objref};
+                my $chng = $arr->{changes};
+                $self->log(Dumper $chng);
+
+                $self->log(" - unshift not found or forceUnshiftOperator => 0");
+                # handle fields as normal (i.e. using $remove/$push etc)
+                for my $chg (@$chng) {
+                    # We never get unshift, its handled separately
+                    # And since order is important, we'll just do all these operations individually
+                    if($chg->{type} eq '$push') {
+                        if($self->{meta}->{fields}->{$field}->{args}->{type} || $self->{meta}->{fields}->{$field}->{args}->{types}) {
+                            my $update = { '$push' => { "$field" => $chg->{value}->{doc} } };
+                            $self->log("   - chg: push chg->value->doc on ref " . (ref $chg->{value}));
+                            $self->{col}->update($self->getLocator, $update);
+                        } else {
+                            my $update = { '$push' => { "$field" => $chg->{value} } };
+                            $self->log("   - chg: push chg->value on ref " . (ref $chg->{value}));
+                            $self->{col}->update($self->getLocator, $update);
+                        }
+                    } elsif ($chg->{type} eq '$pop') {
+                        my $update = { '$pop' => { "$field" => 1 } };
+                            $self->log("   - chg: pop");
+                        $self->{col}->update($self->getLocator, $update);
+                    } elsif ($chg->{type} eq '$shift') {
+                        my $update = { '$pop' => { "$field" => -1 } };
+                            $self->log("   - chg: shift");
+                        $self->{col}->update($self->getLocator, $update);
+                    }
+                }
+
+                # Changes are saved, empty array
+                $arr->{changes} = [];
+            }
+        }
+        
+        # Changes here are saved too, also empty array
         $self->{changes} = {};
+
+        # Run any callbacks
         for my $cb (@{$self->{callbacks}}) {
             &$cb;
         }
         $self->{callbacks} = [];
     } else {
-        my $changes = $self->{changes};
-        $self->log("Save:: changes:");
-        $self->log(Dumper $changes);
-        $self->log("Doesn't exist in db");
-        my $id = $self->{col}->insert($changes);
+        my $obj = {};
+        $self->log("Save:: insert");
+        for my $field (keys %{$self->{meta}->{fields}}) {
+            $self->log("checking field $field");
+            # TODO perhaps should be a difference between unset and undefined?
+            if($self->$field) {
+                $self->log("field $field has a value: " . $self->$field);
+                if($self->{meta}->{fields}->{$field}->{type} =~ /array/i) {
+                    $self->log("field $field is an array");
+                    $obj->{$field} = $self->{arraycache}->{$field}->{objref}->{doc};
+                } elsif ($self->{meta}->{fields}->{$field}->{type} =~ /object/i) {
+                    $self->log("field $field is an object");
+                    my $o = $self->$field;
+                    $self->log(Dumper $o);
+                    $self->log(ref $o);
+                    $obj->{$field} = ref $o eq 'HASH' ? $o : $o->{doc};
+                } else {
+                    $self->log("field $field is a scalar:");
+                    $self->log(Dumper $self->$field);
+                    $obj->{$field} = $self->$field;
+                }
+            }
+        }
+
+        $self->log(Dumper $obj);
+        my $id = $self->{col}->insert($obj);
         $self->{existsInDb} = 1;
+        # TODO what about inner object changes
         $self->{changes} = {};
         $self->{callbacks} = [];
         $self->log(Dumper $id);
@@ -196,70 +303,6 @@ sub hasChanges {
     my ($self) = @_;
 
     return scalar keys %{$self->{changes}} > 0 ? 1 : 0;
-}
-
-sub getUpdates {
-    my ($self) = @_;
-
-    $self->log("getUpdates for " . ref($self));
-    my %changes = ();
-
-    # Start with anything added to the changes hash
-    for my $key (keys %{$self->{changes}}) {
-        # Arrays are done below
-        next if $self->{meta}->{fields}->{$key}->{type} =~ /array/i;
-
-        $self->log(" - adding change for $key:");
-        $self->log(Dumper $self->{changes}->{$key});
-        $changes{'$set'}{$key} = $self->{changes}->{$key};
-    }
-
-    # Next loop fields looking for objects or arrays
-    for my $field (keys %{$self->{meta}->{fields}}) {
-        $self->log("checking field $field");
-        if($self->{meta}->{fields}->{$field}->{type} =~ /object/i) {
-            $self->log(" - field $field is object type");
-            my $obj = $self->$field;
-            my $chng = ref($obj) && ref($obj) !~ /HASH/ ? $obj->getUpdates : $obj;
-            $self->log(Dumper $chng);
-            for my $chg (keys %{$chng->{'$set'}}) {
-                $changes{'$set'}{"$field.$chg"} = $chng->{'$set'}->{$chg};
-            }
-        }
-        if($self->{meta}->{fields}->{$field}->{type} =~ /array/i) {
-            $self->log(" - field $field is array type");
-            $self->$field; # triggers array initialisation if it hasn't already happened
-            my $arr = $self->{arraycache}->{$field}->{objref};
-            my $chng = $arr->{changes};
-            $self->log(Dumper $chng);
-            my %types = ( 
-                '$push' => '$pushAll',
-            );
-            my $unshift = $chng->{'$unshift'};
-            if($self->{forceUnshiftOperator} && $unshift && scalar @$unshift > 0) { 
-                # we've used $unshift, which doesn't exist, so just add the entire array again to simulate it
-                $self->log(" - unshift found and forceUnshiftOperator set, rewriting array");
-                $changes{'$set'}{"$field"} = $self->$field;
-            } else {
-                $self->log(" - unshift not found or forceUnshiftOperator => 0");
-                # handle fields as normal (i.e. using $remove/$push etc)
-                for my $type (keys %types) {
-                    my $mtype = $types{$type}; 
-                    for my $chg (@{$chng->{$type}}) {
-                        $changes{$mtype}{$field} = [] if !$changes{$mtype}{"$field"};
-                        if($self->{meta}->{fields}->{$field}->{args}->{type} || $self->{meta}->{fields}->{$field}->{args}->{types}) {
-                            push @{$changes{$mtype}{"$field"}}, $chg->{doc};
-                        } else {
-                            push @{$changes{$mtype}{"$field"}}, $chg;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    $self->log(Dumper \%changes);
-    return \%changes;
 }
 
 sub dump {
@@ -364,14 +407,16 @@ sub arrayAccessor {
                     push @arr, $item;
                 }
             }
-        }
-        my $a = tie my @array, 'MongoDB::Simple::ArrayType', parent => $self, field => $field, array => \@arr;
-        $self->{arraycache}->{$field} = {
-            arrayref => \@array,
-            objref => $a
-        };
 
-        return \@array;
+            my $a = tie my @array, 'MongoDB::Simple::ArrayType', parent => $self, field => $field, array => \@arr;
+            $self->{arraycache}->{$field} = {
+                arrayref => \@array,
+                objref => $a
+            };
+            return \@array;
+        }
+
+        return undef;
     }
 
     return if $self->{doc} && $value && $self->{doc}->{$field} && $value eq $self->{doc}->{$field};
@@ -385,9 +430,12 @@ sub arrayAccessor {
         };
         push @array, @$value;
         $value = $a->{array};
+        #$value = \@array;
     }
 
-    $self->{changes}->{$field} = $value;
+    # Don't think we want to do this... it causes an array to be seen as a change, but its handled separately
+    # $self->{changes}->{$field} = $value;
+
     # XXX unsure if we want to set doc or not.... if we do, it makes insert/upsert easier
     $self->{doc}->{$field} = $value;
 

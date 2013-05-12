@@ -43,6 +43,7 @@ sub makeNewObject {
     $obj->attr({ key1 => 'key 1', key2 => 'key 2' });
     $obj->tags(['tag1', 'tag2']);
     $obj->metadata($meta);
+    $obj->labels([]);
     push $obj->labels, $label;
 
     my $id = $obj->save;
@@ -65,7 +66,7 @@ subtest 'Update a document - scalar arrays' => sub {
         is_deeply($obj->{doc}, {
             "_id" => $id,
             "name" => 'Test name',
-            "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+            "created" => DateTime::Format::W3CDTF->parse_datetime($dt),
             "available" => true,
             "attr" => { key1 => 'key 1', key2 => 'key 2' },
             "tags" => ['tag1', 'tag2'],
@@ -77,7 +78,7 @@ subtest 'Update a document - scalar arrays' => sub {
                     "text" => 'test label'
                 }
             ]
-        }, 'Correct document returned by MongoDB driver');
+        }, 'Correct document returned by MongoDB driver after makeNewObject');
 
         for(my $i = 0; $i < 5; $i++) { 
             push $obj->tags, 'new tag ' . ($i+1);;
@@ -86,12 +87,12 @@ subtest 'Update a document - scalar arrays' => sub {
         $obj->save;
         $obj->load($id);
         is($obj->hasChanges, 0, 'Loaded document has no changes');
-        is(scalar @{$obj->tags}, 7, 'New items can be retrieved');
+        is(scalar @{$obj->tags}, 7, 'New items can be retrieved from array');
 
         is_deeply($obj->{doc}, {
             "_id" => $id,
             "name" => 'Test name',
-            "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+            "created" => DateTime::Format::W3CDTF->parse_datetime($dt),
             "available" => true,
             "attr" => { key1 => 'key 1', key2 => 'key 2' },
             "tags" => ['tag1', 'tag2', 'new tag 1', 'new tag 2', 'new tag 3', 'new tag 4', 'new tag 5'],
@@ -101,7 +102,7 @@ subtest 'Update a document - scalar arrays' => sub {
             "labels" => [
                 { "text" => 'test label' }
             ]
-        }, 'Correct document returned by MongoDB driver');
+        }, 'Correct document returned by MongoDB driver after adding item to scalar array');
     }
 };
 
@@ -120,7 +121,7 @@ subtest 'Update a document - scalar array operators' => sub {
         is_deeply($obj->{doc}, {
             "_id" => $id,
             "name" => 'Test name',
-            "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+            "created" => DateTime::Format::W3CDTF->parse_datetime($dt),
             "available" => true,
             "attr" => { key1 => 'key 1', key2 => 'key 2' },
             "tags" => ['tag1', 'tag2', 'Push test'],
@@ -132,7 +133,7 @@ subtest 'Update a document - scalar array operators' => sub {
                     "text" => 'test label'
                 }
             ]
-        }, 'Correct document returned by MongoDB driver');
+        }, 'Correct document returned by MongoDB driver after makeNewObject');
 
      
         # Tests the behaviour that unshift actually implements
@@ -145,7 +146,7 @@ subtest 'Update a document - scalar array operators' => sub {
         is_deeply($obj->{doc}, {
             "_id" => $id,
             "name" => 'Test name',
-            "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+            "created" => DateTime::Format::W3CDTF->parse_datetime($dt),
             "available" => true,
             "attr" => { key1 => 'key 1', key2 => 'key 2' },
             "tags" => ['tag1', 'tag2', 'Unshift test'],
@@ -157,7 +158,7 @@ subtest 'Update a document - scalar array operators' => sub {
                     "text" => 'test label'
                 }
             ]
-        }, 'Correct document returned by MongoDB driver');
+        }, 'Correct document returned by MongoDB driver after array unshift (as push)');
 
         $obj->{warnOnUnshiftOperator} = 0;
         warning_is { unshift $obj->tags, 'Unshift test'; } undef, 'Use of unshift with warnOnUnshiftOperator disabled generates no warnings';
@@ -175,7 +176,7 @@ subtest 'Update a document - scalar array operators' => sub {
         is_deeply($obj->{doc}, {
             "_id" => $id,
             "name" => 'Test name',
-            "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+            "created" => DateTime::Format::W3CDTF->parse_datetime($dt),
             "available" => true,
             "attr" => { key1 => 'key 1', key2 => 'key 2' },
             "tags" => ['Unshift test', 'tag1', 'tag2'],
@@ -187,55 +188,53 @@ subtest 'Update a document - scalar array operators' => sub {
                     "text" => 'test label'
                 }
             ]
-        }, 'Correct document returned by MongoDB driver after unshift');
+        }, 'Correct document returned by MongoDB driver after unshift (forceUnshiftOperator)');
 
-        TODO: {
-            local $TODO = 'pop and shift not implemented';
-            
-            ($id, $dt, $meta, $label) = makeNewObject;
-            $obj->load($id);
-            my $tag = pop $obj->tags;
-            $obj->save;
-            $obj->load($id);
-            is($tag, 'tag2', 'Correct tag popped off array');
-            is_deeply($obj->{doc}, {
-                "_id" => $id,
-                "name" => 'Test name',
-                "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
-                "available" => true,
-                "attr" => { key1 => 'key 1', key2 => 'key 2' },
-                "tags" => ['tag1'],
-                "metadata" => {
-                    "type" => 'meta type'
-                },
-                "labels" => [
-                    {
-                        "text" => 'test label'
-                    }
-                ]
-            }, 'Correct document returned by MongoDB driver');
+        ($id, $dt, $meta, $label) = makeNewObject;
+        $obj->load($id);
+        my $tag = pop $obj->tags;
+        $obj->save;
+        $obj->load($id);
+        is($tag, 'tag2', 'Correct tag popped off array');
+        is_deeply($obj->{doc}, {
+            "_id" => $id,
+            "name" => 'Test name',
+            "created" => DateTime::Format::W3CDTF->parse_datetime($dt),
+            "available" => true,
+            "attr" => { key1 => 'key 1', key2 => 'key 2' },
+            "tags" => ['tag1'],
+            "metadata" => {
+                "type" => 'meta type'
+            },
+            "labels" => [
+                {
+                    "text" => 'test label'
+                }
+            ]
+        }, 'Correct document returned by MongoDB driver after array pop');
 
-            my $tag2 = shift $obj->tags;
-            $obj->save;
-            $obj->load($id);
-            is($tag2, 'tag1', 'Correct tag shifted from array');
-            is_deeply($obj->{doc}, {
-                "_id" => $id,
-                "name" => 'Test name',
-                "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
-                "available" => true,
-                "attr" => { key1 => 'key 1', key2 => 'key 2' },
-                "tags" => ['tag2'],
-                "metadata" => {
-                    "type" => 'meta type'
-                },
-                "labels" => [
-                    {
-                        "text" => 'test label'
-                    }
-                ]
-            }, 'Correct document returned by MongoDB driver');
-        }
+        ($id, $dt, $meta, $label) = makeNewObject;
+        $obj->load($id);
+        my $tag2 = shift $obj->tags;
+        $obj->save;
+        $obj->load($id);
+        is($tag2, 'tag1', 'Correct tag shifted from array');
+        is_deeply($obj->{doc}, {
+            "_id" => $id,
+            "name" => 'Test name',
+            "created" => DateTime::Format::W3CDTF->parse_datetime($dt),
+            "available" => true,
+            "attr" => { key1 => 'key 1', key2 => 'key 2' },
+            "tags" => ['tag2'],
+            "metadata" => {
+                "type" => 'meta type'
+            },
+            "labels" => [
+                {
+                    "text" => 'test label'
+                }
+            ]
+        }, 'Correct document returned by MongoDB driver after array shift');
     }
 };
 
@@ -254,7 +253,7 @@ subtest 'Update a document - typed arrays' => sub {
         is_deeply($obj->{doc}, {
             "_id" => $id,
             "name" => 'Test name',
-            "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+            "created" => DateTime::Format::W3CDTF->parse_datetime($dt),
             "available" => true,
             "attr" => { key1 => 'key 1', key2 => 'key 2' },
             "tags" => ['tag1', 'tag2'],
@@ -266,7 +265,7 @@ subtest 'Update a document - typed arrays' => sub {
                     "text" => 'test label'
                 }
             ]
-        }, 'Correct document returned by MongoDB driver');
+        }, 'Correct document returned by MongoDB driver after makeNewObject');
 
         my @labels = ();
         for(my $i = 0; $i < 5; $i++) { 
@@ -281,11 +280,10 @@ subtest 'Update a document - typed arrays' => sub {
         is($obj->hasChanges, 0, 'Loaded document has no changes');
         is(scalar @{$obj->labels}, 6, 'New items can be retrieved');
         is(ref $obj->labels->[3], 'MongoDB::Simple::Test::Label', 'Retrieved object has correct type');
-
         is_deeply($obj->{doc}, {
             "_id" => $id,
             "name" => 'Test name',
-            "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+            "created" => DateTime::Format::W3CDTF->parse_datetime($dt),
             "available" => true,
             "attr" => { key1 => 'key 1', key2 => 'key 2' },
             "tags" => ['tag1', 'tag2'],
@@ -300,7 +298,7 @@ subtest 'Update a document - typed arrays' => sub {
                 { "text" => 'Label 4' },
                 { "text" => 'Label 5' },
             ]
-        }, 'Correct document returned by MongoDB driver');
+        }, 'Correct document returned by MongoDB driver after typed array push');
     }
 };
 
@@ -319,7 +317,7 @@ subtest 'Identify correct document type in array' => sub {
         is_deeply($obj->{doc}, {
             "_id" => $id,
             "name" => 'Test name',
-            "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+            "created" => DateTime::Format::W3CDTF->parse_datetime($dt),
             "available" => true,
             "attr" => { key1 => 'key 1', key2 => 'key 2' },
             "tags" => ['tag1', 'tag2'],
@@ -331,14 +329,14 @@ subtest 'Identify correct document type in array' => sub {
                     "text" => 'test label'
                 }
             ]
-        }, 'Correct document returned by MongoDB driver');
+        }, 'Correct document returned by MongoDB driver after makeNewObject');
 
         my $label1 = new MongoDB::Simple::Test::Label;
         $label1->text('Label test');
         my $meta1 = new MongoDB::Simple::Test::Meta;
         $meta1->type('Meta test');
+        $obj->multi([]);
         push $obj->multi, $label1, $meta1;
-
         $obj->save;
         $obj->load($id);
 
@@ -349,7 +347,7 @@ subtest 'Identify correct document type in array' => sub {
         is_deeply($obj->{doc}, {
             "_id" => $id,
             "name" => 'Test name',
-            "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+            "created" => DateTime::Format::W3CDTF->parse_datetime($dt),
             "available" => true,
             "attr" => { key1 => 'key 1', key2 => 'key 2' },
             "tags" => ['tag1', 'tag2'],
@@ -365,6 +363,6 @@ subtest 'Identify correct document type in array' => sub {
                 { "text" => 'Label test' },
                 { "type" => 'Meta test' },
             ],
-        }, 'Correct document returned by MongoDB driver');
+        }, 'Correct document returned by MongoDB driver after multi-type array push');
     }
 };

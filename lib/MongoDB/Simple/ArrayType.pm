@@ -17,7 +17,8 @@ sub new {
         'parent' => undef,
         'field' => undef,
         'meta' => undef,
-        'changes' => {},
+        'changes' => [],
+        'doc' => [], # represents the arrayref used by mongodb
         %args
     }, $class;
 
@@ -58,14 +59,26 @@ sub CLEAR     {
 sub POP       { 
     my ($self) = @_;
     $self->{parent}->log("ArrayType::POP");
+    $self->{changes} = [] if !$self->{changes};
+
     my $obj = pop(@{$self->{array}});
+    pop @{$self->{doc}};
+    if($obj) {
+        my $value = $obj;
+        $value = $obj->{doc} if ref($obj) !~ /^(|HASH)$/;
+        push $self->{changes}, {
+            type => '$pop',
+            value => $obj
+        };
+    }
+
     return $obj;
 }
 sub PUSH      { 
     my $self = shift;
     $self->{parent}->log("ArrayType::PUSH field[" . $self->{field} . "]");
     $self->{parent}->log(caller);
-    $self->{changes}->{'$push'} = [] if !$self->{changes}->{'$push'};
+    $self->{changes} = [] if !$self->{changes};
 
     for(my $i = 0; $i < scalar @_; $i++) {
         my $obj = $_[$i];
@@ -98,9 +111,14 @@ sub PUSH      {
         }
 
         # TODO only want to store doc/changes if its a change, not a load
-        push @{$self->{parent}->{changes}->{$self->{field}}}, $value;
+        #push @{$self->{parent}->{changes}->{$self->{field}}}, $value;
         #push @{$self->{parent}->{doc}->{$self->{field}}}, $value;
-        push $self->{changes}->{'$push'}, $obj;
+        $self->{parent}->log("ARRAYTYPE push obj " . (ref $obj));
+        push $self->{changes}, {
+            type => '$push',
+            value => $obj # we push obj here, Simple decides whether to use obj or obj->doc
+        };
+        push @{$self->{doc}}, $value;
 
         push @{$self->{array}}, $obj;
     }
@@ -109,6 +127,16 @@ sub SHIFT     {
     my ($self) = @_;
     $self->{parent}->log("ArrayType::SHIFT");
     my $obj = shift(@{$self->{array}});
+    shift @{$self->{doc}};
+    my $value = $obj;
+    my $class = ref $obj;
+    if($class && $class !~ /HASH/) {
+        $value = $obj->{doc};
+    }
+    push $self->{changes}, {
+        type => '$shift',
+        value => $value
+    };
     return $obj;
 }
 sub UNSHIFT   { 
@@ -132,8 +160,6 @@ sub UNSHIFT   {
 
     $self->{parent}->log("ArrayType::UNSHIFT (forceUnshiftOperator => 1)");
 
-    $self->{changes}->{'$unshift'} = [] if !$self->{changes}->{'$unshift'};
-
     for(my $i = 0; $i < scalar @_; $i++) {
         my $obj = $_[$i];
 
@@ -165,12 +191,12 @@ sub UNSHIFT   {
         }
 
         # TODO only want to store doc/changes if its a change, not a load
-        unshift @{$self->{parent}->{changes}->{$self->{field}}}, $value;
+        #unshift @{$self->{parent}->{changes}->{$self->{field}}}, $value;
         #push @{$self->{parent}->{doc}->{$self->{field}}}, $value;
-        $self->{parent}->log('Adding object $obj to changes->$unshift');
-        push $self->{changes}->{'$unshift'}, $obj;
+        $self->{'$unshift'} = 1;
 
         unshift @{$self->{array}}, $obj;
+        unshift @{$self->{doc}}, $obj;
     }
 }
 

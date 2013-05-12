@@ -43,6 +43,7 @@ sub makeNewObject {
     $obj->attr({ key1 => 'key 1', key2 => 'key 2' });
     $obj->tags(['tag1', 'tag2']);
     $obj->metadata($meta);
+    $obj->labels([]);
     push $obj->labels, $label;
 
     my $id = $obj->save;
@@ -64,7 +65,7 @@ subtest 'Update a document - objects' => sub {
         is_deeply($obj->{doc}, {
             "_id" => $id,
             "name" => 'Test name',
-            "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+            "created" => DateTime::Format::W3CDTF->parse_datetime($dt),
             "available" => true,
             "attr" => { key1 => 'key 1', key2 => 'key 2' },
             "tags" => ['tag1', 'tag2'],

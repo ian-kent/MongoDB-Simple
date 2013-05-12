@@ -44,6 +44,7 @@ sub makeNewObject {
     $obj->attr({ key1 => 'key 1', key2 => 'key 2' });
     $obj->tags(['tag1', 'tag2']);
     $obj->metadata($meta);
+    $obj->labels([]);
     push $obj->labels, $label;
 
     my $id = $obj->save;
@@ -68,16 +69,13 @@ subtest 'MongoDB methods' => sub {
 };
 
 subtest 'Object methods' => sub {
-    plan tests => 8;
+    plan tests => 7;
 
     my $obj = new_ok('MongoDB::Simple::Test');
     isa_ok($obj, 'MongoDB::Simple');
 
-    # Has methods from MongoDB::Simple
-    can_ok($obj, "hasChanges");
-
     # Has mongodb related methods
-    can_ok($obj, "getUpdates", "dump", "locator", "load", "save");
+    can_ok($obj, "dump", "locator", "load", "save");
 
     # Has static methods
     can_ok($obj, "addmeta", "addfieldmeta", "getmeta", "package_start", "oid", "import", "new");
@@ -93,7 +91,7 @@ subtest 'Object methods' => sub {
 };
 
 subtest 'Accessors' => sub {
-    plan tests => 14;
+    plan tests => 13;
 
     my $obj = new MongoDB::Simple::Test;
 
@@ -110,17 +108,17 @@ subtest 'Accessors' => sub {
     $obj->available(true);
     is($obj->available, true, 'Boolean has been changed');
 
-    like(ref($obj->tags), qr/ARRAY/, 'Array is array reference');
-    is(scalar @{$obj->tags}, 0, 'Array length is zero');
+    is($obj->tags, undef, 'Array is undefined');
 
     is($obj->metadata, undef, 'Object is undef');
     my $meta = new MongoDB::Simple::Test::Meta;
     $obj->metadata($meta);
     is($obj->metadata, $meta, 'Object has been changed');
 
-    like(ref($obj->labels), qr/ARRAY/, 'Array is array reference');
-    is(scalar @{$obj->labels}, 0, 'Array length is zero');
     my $label = new MongoDB::Simple::Test::Label;
+    $obj->labels([]);
+    is(scalar @{$obj->labels}, 0, 'Array length is zero');
+    like(ref($obj->labels), qr/ARRAY/, 'Array is array reference');
     push $obj->labels, $label;
     is(scalar @{$obj->labels}, 1, 'Array length is 1');
     is($obj->labels->[0], $label, 'Array contains object');
@@ -140,7 +138,7 @@ subtest 'Insert a document' => sub {
         is_deeply($doc, {
             "_id" => $id,
             "name" => 'Test name',
-            "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
+            "created" => DateTime::Format::W3CDTF->parse_datetime($dt),
             "available" => true,
             "attr" => { key1 => 'key 1', key2 => 'key 2' },
             "tags" => ['tag1', 'tag2'],
@@ -157,33 +155,16 @@ subtest 'Insert a document' => sub {
 };
 
 subtest 'Fetch a document' => sub {
-    plan tests => 14;
+    plan tests => 13;
 
     SKIP: {
-        skip 'MongoDB connection required for test', 14 if !$client;
+        skip 'MongoDB connection required for test', 13 if !$client;
 
         my ($id, $dt, $meta, $label) = makeNewObject;
 
         my $obj = new MongoDB::Simple::Test(client => $client);
         $obj->load($id);
         is($obj->hasChanges, 0, 'Loaded document has no changes');
-
-        is_deeply($obj->{doc}, {
-            "_id" => $id,
-            "name" => 'Test name',
-            "created" => DateTime::Format::W3CDTF->parse_datetime($dt) . 'Z',
-            "available" => true,
-            "attr" => { key1 => 'key 1', key2 => 'key 2' },
-            "tags" => ['tag1', 'tag2'],
-            "metadata" => {
-                "type" => 'meta type'
-            },
-            "labels" => [
-                {
-                    "text" => 'test label'
-                }
-            ]
-        }, 'Correct document returned by MongoDB driver');
 
         is($obj->name, 'Test name', 'Name retrieved');
         is($obj->created, $dt, 'Date retrieved');
