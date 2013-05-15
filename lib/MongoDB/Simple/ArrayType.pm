@@ -17,7 +17,6 @@ sub new {
         'parent' => undef,
         'field' => undef,
         'meta' => undef,
-        'changes' => [],
         'doc' => [], # represents the arrayref used by mongodb
         %args
     }, $class;
@@ -59,17 +58,13 @@ sub CLEAR     {
 sub POP       { 
     my ($self) = @_;
     $self->{parent}->log("ArrayType::POP");
-    $self->{changes} = [] if !$self->{changes};
 
     my $obj = pop(@{$self->{array}});
     pop @{$self->{doc}};
     if($obj) {
         my $value = $obj;
         $value = $obj->{doc} if ref($obj) !~ /^(|HASH)$/;
-        push $self->{changes}, {
-            type => '$pop',
-            value => $obj
-        };
+        $self->{parent}->registerChange($self->{field}, '$pop', $obj);
     }
 
     return $obj;
@@ -78,7 +73,6 @@ sub PUSH      {
     my $self = shift;
     $self->{parent}->log("ArrayType::PUSH field[" . $self->{field} . "]");
     $self->{parent}->log(caller);
-    $self->{changes} = [] if !$self->{changes};
 
     for(my $i = 0; $i < scalar @_; $i++) {
         my $obj = $_[$i];
@@ -93,15 +87,19 @@ sub PUSH      {
                         my $matcher = $MongoDB::Simple::metadata{$type}->{matches};
                         my $matches = &$matcher($obj);
                         if($matches) {
-                            $obj = $type->new(parent => $self->{parent}, doc => $obj);
+                            $obj = $type->new(parent => $self->{parent}, doc => $obj, field => $self->{field}, index => scalar @{$self->{array}});
                         }
                     }
                 }
             } elsif(ref($obj) ne $type && $type) {
-                $obj = $type->new(parent => $self->{parent}, doc => $obj);
-            } else {
-                $obj->{parent} = $self->{parent};
+                $obj = $type->new(parent => $self->{parent}, doc => $obj, field => $self->{field}, index => scalar @{$self->{array}});
             }
+        }
+
+        if(ref $obj) {
+            $obj->{parent} = $self->{parent};
+            $obj->{field} = $self->{field};
+            $obj->{index} = scalar @{$self->{array}};
         }
 
         my $value = $obj;
@@ -114,10 +112,7 @@ sub PUSH      {
         #push @{$self->{parent}->{changes}->{$self->{field}}}, $value;
         #push @{$self->{parent}->{doc}->{$self->{field}}}, $value;
         $self->{parent}->log("ARRAYTYPE push obj " . (ref $obj));
-        push $self->{changes}, {
-            type => '$push',
-            value => $obj # we push obj here, Simple decides whether to use obj or obj->doc
-        };
+        $self->{parent}->registerChange($self->{field}, '$push', $value);
         push @{$self->{doc}}, $value;
 
         push @{$self->{array}}, $obj;
@@ -133,10 +128,7 @@ sub SHIFT     {
     if($class && $class !~ /HASH/) {
         $value = $obj->{doc};
     }
-    push $self->{changes}, {
-        type => '$shift',
-        value => $value
-    };
+    $self->{parent}->registerChange($self->{field}, '$shift', $obj);
     return $obj;
 }
 sub UNSHIFT   { 
@@ -194,6 +186,7 @@ sub UNSHIFT   {
         #unshift @{$self->{parent}->{changes}->{$self->{field}}}, $value;
         #push @{$self->{parent}->{doc}->{$self->{field}}}, $value;
         $self->{'$unshift'} = 1;
+        $self->{parent}->registerChange($self->{field}, '$unshift', $obj);
 
         unshift @{$self->{array}}, $obj;
         unshift @{$self->{doc}}, $obj;

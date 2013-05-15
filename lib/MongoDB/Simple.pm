@@ -63,9 +63,11 @@ sub new {
         'col'           => undef, # stores the collection (or can be passed in)
         'meta'          => undef, # stores the keyword metadata
         'doc'           => {}, # stores the document
-        'changes'       => {}, # stores changes made since load/save
+        'changes'       => [], # stores changes made since load/save
         'callbacks'     => [], # stores callbacks needed for changes
         'parent'        => undef, # stores the parent object
+        'field'         => undef, # stores the field name from the parent object
+        'index'         => undef, # stores the index (if the item is in an array)
         'objcache'      => {}, # stores created objects
         'arraycache'    => {}, # stores array objects
         'existsInDb'    => 0,
@@ -134,7 +136,7 @@ sub load {
 
     $self->{existsInDb} = 1;
     $self->{doc} = $doc;
-    $self->{changes} = {};
+    $self->{changes} = [];
     $self->{callbacks} = [];
     $self->{objcache} = {};
     $self->{arraycache} = {};
@@ -160,6 +162,38 @@ sub getLocator {
     return $id;
 }
 
+sub registerChange {
+    my ($self, $field, $change, $value) = @_;
+
+    # called by accessors and child objects/arrays
+
+    # e.g. 
+    #   registerChange($self, 'name', '$set', 'Test');
+    #   registerChange($self, 'tags', '$push', 'Tag');
+
+    # if no parent, store in {changes}
+    # if parent -> parent->registerChange
+    #   registerChange($self, $self->{field} . '.' . $field, $change, $value);
+
+    if($self->{parent}) {
+        $self->{parent}->registerChange($self->{field} . ( $self->{index} ? '.' . $self->{index} : '' ) . '.' . $field, $change, $value);
+        return;
+    }
+
+    push @{$self->{changes}}, {
+        field => $field,
+        change => $change,
+        value => $value,
+    };
+
+    # change saving to just run all updates in order
+    # if we do all $set's like we do now, we can't do this and expect it to work:
+    #    $obj->arraytype(['a','b','c']);
+    #    pop $obj->arraytype;
+    #    $obj->arraytype(['a','b','c']);
+    #    $obj->save; # arraytype now contains ['a','b'] since pop happened after both sets
+}
+
 sub save {
     my ($self) = @_;
 
@@ -171,92 +205,24 @@ sub save {
         $self->log("Changes::");
         $self->log(Dumper $self->{changes});
 
-        # $set first
-        my $set = {};
-        # First check changes, it contains scalar updates
-        for my $key (keys %{$self->{changes}}) {
-            $self->log(" - adding change to \$set for $key:");
-            $self->log(Dumper $self->{changes}->{$key});
-            $set->{$key} = $self->{changes}->{$key};
-        }
-        # Next loop fields looking for objects
-        for my $field (keys %{$self->{meta}->{fields}}) {
-            $self->log("objects: checking field $field");
-
-            if($self->{meta}->{fields}->{$field}->{type} =~ /object/i) {
-                # Update as an object
-                $self->log(" - field $field is object type");
-                my $obj = $self->$field;
-                # TODO tied hashes - at the moment, hashrefs get fully updated every time
-                my $chng = ref($obj) && ref($obj) !~ /HASH/ ? $obj->{changes} : $obj;
-                $self->log(Dumper $chng);
-                for my $chg (keys %{$chng}) {
-                    $set->{"$field.$chg"} = $chng->{$chg};
-                }
-            }
-
-            if($self->{forceUnshiftOperator} && $self->{meta}->{fields}->{$field}->{type} =~ /array/i && $self->{arraycache}->{$field} && $self->{arraycache}->{$field}->{objref}->{'$unshift'}) {
-                # we have an array which needs unshifting, so just rewrite it
-                $self->log(" - unshift found and forceUnshiftOperator set, rewriting array");
-                $set->{"$field"} = $self->$field;
-            }
-        }
-        # Update the database with the $set changes
-        if(scalar keys %$set > 0) {
-            $self->{col}->update($self->getLocator, {
-                '$set' => $set
-            });
-        }
-
-        # Next loop fields looking for arrays which need updating
-        for my $field (keys %{$self->{meta}->{fields}}) {
-            $self->log("arrays: checking field $field");
-
-            if($self->{meta}->{fields}->{$field}->{type} =~ /array/i) {
-                $self->log(" - field $field is array type");
-                $self->$field; # triggers array initialisation if it hasn't already happened
-
-                # Skip it if we're forcing unshift and we've actually unshifted
-                next if $self->{forceUnshiftOperator} && $self->{arraycache}->{$field} && $self->{arraycache}->{$field}->{objref}->{'$unshift'};
-
-                # Get the array and its changes
-                my $arr = $self->{arraycache}->{$field}->{objref};
-                my $chng = $arr->{changes};
-                $self->log(Dumper $chng);
-
-                $self->log(" - unshift not found or forceUnshiftOperator => 0");
-                # handle fields as normal (i.e. using $remove/$push etc)
-                for my $chg (@$chng) {
-                    # We never get unshift, its handled separately
-                    # And since order is important, we'll just do all these operations individually
-                    if($chg->{type} eq '$push') {
-                        if($self->{meta}->{fields}->{$field}->{args}->{type} || $self->{meta}->{fields}->{$field}->{args}->{types}) {
-                            my $update = { '$push' => { "$field" => $chg->{value}->{doc} } };
-                            $self->log("   - chg: push chg->value->doc on ref " . (ref $chg->{value}));
-                            $self->{col}->update($self->getLocator, $update);
-                        } else {
-                            my $update = { '$push' => { "$field" => $chg->{value} } };
-                            $self->log("   - chg: push chg->value on ref " . (ref $chg->{value}));
-                            $self->{col}->update($self->getLocator, $update);
-                        }
-                    } elsif ($chg->{type} eq '$pop') {
-                        my $update = { '$pop' => { "$field" => 1 } };
-                            $self->log("   - chg: pop");
-                        $self->{col}->update($self->getLocator, $update);
-                    } elsif ($chg->{type} eq '$shift') {
-                        my $update = { '$pop' => { "$field" => -1 } };
-                            $self->log("   - chg: shift");
-                        $self->{col}->update($self->getLocator, $update);
+        for my $change (@{$self->{changes}}) {
+            if($change->{change} eq '$unshift') {
+                # rewrite array
+            } else {
+                if($change->{change} eq '$shift') {
+                    $change->{change} = '$pop';
+                    $change->{value} = -1;
+                } 
+                $self->{col}->update($self->getLocator, {
+                    $change->{change} => {
+                        $change->{field} => $change->{value}
                     }
-                }
-
-                # Changes are saved, empty array
-                $arr->{changes} = [];
+                });
             }
         }
         
         # Changes here are saved too, also empty array
-        $self->{changes} = {};
+        $self->{changes} = [];
 
         # Run any callbacks
         for my $cb (@{$self->{callbacks}}) {
@@ -292,7 +258,7 @@ sub save {
         my $id = $self->{col}->insert($obj);
         $self->{existsInDb} = 1;
         # TODO what about inner object changes
-        $self->{changes} = {};
+        $self->{changes} = [];
         $self->{callbacks} = [];
         $self->log(Dumper $id);
         return $id;
@@ -302,7 +268,7 @@ sub save {
 sub hasChanges {
     my ($self) = @_;
 
-    return scalar keys %{$self->{changes}} > 0 ? 1 : 0;
+    return scalar @{$self->{changes}} > 0 ? 1 : 0;
 }
 
 sub dump {
@@ -332,12 +298,12 @@ sub defaultAccessor {
     my ($self, $field, $value) = @_;
 
     if(scalar @_ <= 2) {
-        return $self->{changes}->{$field} // $self->{doc}->{$field};
+        return $self->{doc}->{$field};
     }
 
     return if $self->{doc} && $value && $self->{doc}->{$field} && $value eq $self->{doc}->{$field};
 
-    $self->{changes}->{$field} = $value;
+    $self->registerChange($field, '$set', $value);
     # XXX unsure if we want to set doc or not.... if we do, it makes insert/upsert easier
     $self->{doc}->{$field} = $value;
 
@@ -354,7 +320,7 @@ sub dateAccessor {
     my ($self, $field, $value) = @_;
 
     if(scalar @_ <= 2) {
-        $value = $self->{changes}->{$field} // $self->{doc}->{$field};
+        $value = $self->{doc}->{$field};
         $value = DateTime::Format::W3CDTF->new->parse_datetime($value) if $value;
         return $value;
     }
@@ -365,7 +331,7 @@ sub dateAccessor {
 
     return if $self->{doc} && $value && $self->{doc}->{$field} && $value eq $self->{doc}->{$field};
 
-    $self->{changes}->{$field} = $value;
+    $self->registerChange($field, '$set', $value);
     # XXX unsure if we want to set doc or not.... if we do, it makes insert/upsert easier
     $self->{doc}->{$field} = $value;
 
@@ -386,7 +352,7 @@ sub arrayAccessor {
                 my $type = $self->{meta}->{fields}->{$field}->{args}->{type};
                 my $types = $self->{meta}->{fields}->{$field}->{args}->{types};
                 if($type) {
-                    push @arr, $type->new(parent => $self, doc => $item);
+                    push @arr, $type->new(parent => $self, doc => $item, field => $field, index => scalar @arr);
                 } elsif ($types) {
                     my $matched = 0;
                     for my $type (@$types) {
@@ -394,7 +360,7 @@ sub arrayAccessor {
                             my $matcher = $metadata{$type}->{matches};
                             my $matches = &$matcher($item);
                             if($matches) {
-                                push @arr, $type->new(parent => $self, doc => $item);
+                                push @arr, $type->new(parent => $self, doc => $item, field => $field, index => scalar @arr);
                                 $matched = 1;
                                 last;
                             }
@@ -435,6 +401,7 @@ sub arrayAccessor {
 
     # Don't think we want to do this... it causes an array to be seen as a change, but its handled separately
     # $self->{changes}->{$field} = $value;
+    #$self->registerChange($field, '$set', $value);
 
     # XXX unsure if we want to set doc or not.... if we do, it makes insert/upsert easier
     $self->{doc}->{$field} = $value;
@@ -453,7 +420,7 @@ sub objectAccessor {
                 return $self->{objcache}->{$field};
             }
             if($self->{doc}->{$field}) {
-                $obj = $type->new(parent => $self, doc => $self->{doc}->{$field});
+                $obj = $type->new(parent => $self, doc => $self->{doc}->{$field}, field => $field);
                 $self->{objcache}->{$field} = $obj;
             }
             return $obj;
@@ -464,11 +431,12 @@ sub objectAccessor {
     if(ref($value) !~ /^HASH$/) {
         $self->{objcache}->{$field} = $value;
         $value->{parent} = $self;
+        $value->{field} = $field;
         $value = $value->{doc};
     }
     return if $self->{doc} && $value && $self->{doc}->{$field} && $value eq $self->{doc}->{$field};
 
-    $self->{changes}->{$field} = $value;
+    $self->registerChange($field, '$set', $value);
     # XXX unsure if we want to set doc or not.... if we do, it makes insert/upsert easier
     $self->{doc}->{$field} = $value;
 

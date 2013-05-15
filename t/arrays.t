@@ -239,10 +239,10 @@ subtest 'Update a document - scalar array operators' => sub {
 };
 
 subtest 'Update a document - typed arrays' => sub {
-    plan tests => 7;
+    plan tests => 8;
 
     SKIP: {
-        skip 'MongoDB connection required for test', 7 if !$client;
+        skip 'MongoDB connection required for test', 8 if !$client;
 
         my ($id, $dt, $meta, $label) = makeNewObject;
 
@@ -299,6 +299,11 @@ subtest 'Update a document - typed arrays' => sub {
                 { "text" => 'Label 5' },
             ]
         }, 'Correct document returned by MongoDB driver after typed array push');
+
+        $obj->labels->[1]->text('Updated label');
+        $obj->save;
+        $obj->load($id);
+        is($obj->labels->[1]->text, 'Updated label', 'Scalar values in typed array items are updated');
     }
 };
 
