@@ -174,9 +174,12 @@ sub registerChange {
     # if no parent, store in {changes}
     # if parent -> parent->registerChange
     #   registerChange($self, $self->{field} . '.' . $field, $change, $value);
+    
+    $self->log("registerChange: field[$field], change[$change], value[" . ($value ? $value : '<undef>') . "]");
 
     if($self->{parent}) {
-        $self->{parent}->registerChange($self->{field} . ( $self->{index} ? '.' . $self->{index} : '' ) . '.' . $field, $change, $value);
+        $self->log("  -- passing to parent (index: " . (defined $self->{index} ? $self->{index} : 'none') . ")");
+        $self->{parent}->registerChange($self->{field} . ( defined $self->{index} ? '.' . $self->{index} : '' ) . '.' . $field, $change, $value);
         return;
     }
 

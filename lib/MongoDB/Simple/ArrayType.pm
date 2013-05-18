@@ -48,6 +48,12 @@ sub STORE     {
 sub FETCH     { 
     my ($self, $index) = @_;
     $self->{parent}->log("ArrayType::FETCH index[$index]");
+    if(ref($self->{array}->[$index])) {
+        if(ref($self->{array}->[$index]) ne 'ARRAY') {
+            $self->{parent}->log("ArrayType::FETCH adding index to object");
+            $self->{array}->[$index]->{index} = $index;
+        }
+    }
     return $self->{array}->[$index];
 }
 sub CLEAR     { 

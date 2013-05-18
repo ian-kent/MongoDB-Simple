@@ -308,10 +308,10 @@ subtest 'Update a document - typed arrays' => sub {
 };
 
 subtest 'Identify correct document type in array' => sub {
-    plan tests => 6;
+    plan tests => 7;
 
     SKIP: {
-        skip 'MongoDB connection required for test', 6 if !$client;
+        skip 'MongoDB connection required for test', 7 if !$client;
 
         my ($id, $dt, $meta, $label) = makeNewObject;
 
@@ -369,5 +369,10 @@ subtest 'Identify correct document type in array' => sub {
                 { "type" => 'Meta test' },
             ],
         }, 'Correct document returned by MongoDB driver after multi-type array push');
+
+        $obj->multi->[0]->text('New label test');
+        $obj->save;
+        $obj->load($id);
+        is($obj->multi->[0]->text, 'New label test', 'String inside object inside array is updated');
     }
 };
