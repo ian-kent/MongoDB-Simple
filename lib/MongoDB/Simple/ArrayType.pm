@@ -185,8 +185,8 @@ sub UNSHIFT   {
         # TODO only want to store doc/changes if its a change, not a load
         #unshift @{$self->{parent}->{changes}->{$self->{field}}}, $value;
         #push @{$self->{parent}->{doc}->{$self->{field}}}, $value;
-        $self->{'$unshift'} = 1;
-        $self->{parent}->registerChange($self->{field}, '$unshift', $obj);
+        #$self->{'$unshift'} = 1;
+        $self->{parent}->registerChange($self->{field}, '$unshift', $self->{array});
 
         unshift @{$self->{array}}, $obj;
         unshift @{$self->{doc}}, $obj;

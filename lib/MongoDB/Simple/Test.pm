@@ -42,6 +42,7 @@ matches sub {
 };
 
 string 'type'  => undef;
+object 'label' => { type => 'MongoDB::Simple::Test::Label' };
 
 ################################################################################
 

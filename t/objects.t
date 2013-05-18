@@ -51,10 +51,10 @@ sub makeNewObject {
 }
 
 subtest 'Update a document - objects' => sub {
-    plan tests => 3;
+    plan tests => 5;
 
     SKIP: {
-        skip 'MongoDB connection required for test', 3 if !$client;
+        skip 'MongoDB connection required for test', 5 if !$client;
 
         my ($id, $dt, $meta, $label) = makeNewObject;
 
@@ -83,5 +83,17 @@ subtest 'Update a document - objects' => sub {
         $obj->save;
         $obj->load($id);
         is($obj->metadata->type, 'new meta type', 'String inside object is updated');
+
+        my $label2 = new MongoDB::Simple::Test::Label;
+        $label2->text('test label');
+        $obj->metadata->label($label2);
+        $obj->save;
+        $obj->load($id);
+        is($obj->metadata->label->text, 'test label', 'String inside object inside object is set');
+
+        $obj->metadata->label->text('new label');
+        $obj->save;
+        $obj->load($id);
+        is($obj->metadata->label->text, 'new label', 'String inside object inside object is updated');
     }
 };

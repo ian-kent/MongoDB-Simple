@@ -207,7 +207,12 @@ sub save {
 
         for my $change (@{$self->{changes}}) {
             if($change->{change} eq '$unshift') {
-                # rewrite array
+                # rewrite array - $unshift needs to set the field as array and value as array, not as array item
+                $self->{col}->update($self->getLocator, {
+                    '$set' => {
+                        $change->{field} => $change->{value}
+                    }
+                });
             } else {
                 if($change->{change} eq '$shift') {
                     $change->{change} = '$pop';
