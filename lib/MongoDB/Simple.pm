@@ -163,7 +163,7 @@ sub getLocator {
 }
 
 sub registerChange {
-    my ($self, $field, $change, $value) = @_;
+    my ($self, $field, $change, $value, $callbacks) = @_;
 
     # called by accessors and child objects/arrays
 
@@ -179,7 +179,7 @@ sub registerChange {
 
     if($self->{parent}) {
         $self->log("  -- passing to parent (index: " . (defined $self->{index} ? $self->{index} : 'none') . ")");
-        $self->{parent}->registerChange($self->{field} . ( defined $self->{index} ? '.' . $self->{index} : '' ) . '.' . $field, $change, $value);
+        $self->{parent}->registerChange($self->{field} . ( defined $self->{index} ? '.' . $self->{index} : '' ) . '.' . $field, $change, $value, $callbacks);
         return;
     }
 
@@ -187,6 +187,7 @@ sub registerChange {
         field => $field,
         change => $change,
         value => $value,
+        callbacks => $callbacks
     };
 
     # change saving to just run all updates in order
@@ -208,6 +209,8 @@ sub save {
         $self->log("Changes::");
         $self->log(Dumper $self->{changes});
 
+        # TODO can optimise changes, e.g. collapsing array operations
+
         for my $change (@{$self->{changes}}) {
             if($change->{change} eq '$unshift') {
                 # rewrite array - $unshift needs to set the field as array and value as array, not as array item
@@ -227,16 +230,15 @@ sub save {
                     }
                 });
             }
+            if($change->{callbacks}) {
+                for my $cb (@{$change->{callbacks}}) {
+                    &$cb;
+                }
+            }
         }
         
         # Changes here are saved too, also empty array
         $self->{changes} = [];
-
-        # Run any callbacks
-        for my $cb (@{$self->{callbacks}}) {
-            &$cb;
-        }
-        $self->{callbacks} = [];
     } else {
         my $obj = {};
         $self->log("Save:: insert");
@@ -267,7 +269,6 @@ sub save {
         $self->{existsInDb} = 1;
         # TODO what about inner object changes
         $self->{changes} = [];
-        $self->{callbacks} = [];
         $self->log(Dumper $id);
         return $id;
     }
@@ -295,15 +296,34 @@ sub dump {
 sub lookForCallbacks {
     my ($self, $field, $value) = @_;
 
+    my @callbacks = ();
+    $self->log("lookForCallbacks: field[$field], value[" . ($value ? $value : '<undef>') . "]");
     if($self->{meta}->{fields}->{$field}->{args}->{changed}) {
-        push $self->{callbacks}, sub {
+        $self->log("lookForCallbacks: adding 'changed' callback for field '$field'");
+        push @callbacks, sub {
             my $cb = $self->{meta}->{fields}->{$field}->{args}->{changed};
+            $self->log("callback capture: field[$field], value[" . ($value ? $value : '<undef>') . "]");
             &$cb($self, $value);
         };
     }
+    if($self->{meta}->{fields}->{$field}->{type} eq 'array') {
+        for my $callback ("push", "pop", "shift", "unshift") {
+            if($self->{meta}->{fields}->{$field}->{args}->{$callback}) {
+                $self->log("lookForCallbacks: adding '$callback' callback for field '$field'");
+                push @callbacks, sub {
+                    my $cb = $self->{meta}->{fields}->{$field}->{args}->{callback};
+                    $self->log("callback capture: field[$field], value[" . ($value ? $value : '<undef>') . "]");
+                    &$cb($self, $value);
+                };
+            }
+        }
+    }
+    return \@callbacks;
 }
 sub defaultAccessor {
     my ($self, $field, $value) = @_;
+
+    $self->log("defaultAccessor: field[$field], value[" . ($value ? $value : '<undef>') . "]");
 
     if(scalar @_ <= 2) {
         return $self->{doc}->{$field};
@@ -311,11 +331,10 @@ sub defaultAccessor {
 
     return if $self->{doc} && $value && $self->{doc}->{$field} && $value eq $self->{doc}->{$field};
 
-    $self->registerChange($field, '$set', $value);
+    my $callbacks = $self->lookForCallbacks($field, $value);
+    $self->registerChange($field, '$set', $value, $callbacks);
     # XXX unsure if we want to set doc or not.... if we do, it makes insert/upsert easier
     $self->{doc}->{$field} = $value;
-
-    $self->lookForCallbacks($field, $value);
 }
 
 sub stringAccessor {
@@ -339,11 +358,10 @@ sub dateAccessor {
 
     return if $self->{doc} && $value && $self->{doc}->{$field} && $value eq $self->{doc}->{$field};
 
-    $self->registerChange($field, '$set', $value);
+    my $callbacks = $self->lookForCallbacks($field, $value);
+    $self->registerChange($field, '$set', $value, $callbacks);
     # XXX unsure if we want to set doc or not.... if we do, it makes insert/upsert easier
     $self->{doc}->{$field} = $value;
-
-    $self->lookForCallbacks($field, $value);
 }
 sub arrayAccessor {
     my ($self, $field, $value) = @_;
@@ -409,12 +427,12 @@ sub arrayAccessor {
 
     # Don't think we want to do this... it causes an array to be seen as a change, but its handled separately
     # $self->{changes}->{$field} = $value;
-    #$self->registerChange($field, '$set', $value);
+    #$self->registerChange($field, '$set', $value, $callbacks);
 
     # XXX unsure if we want to set doc or not.... if we do, it makes insert/upsert easier
     $self->{doc}->{$field} = $value;
 
-    $self->lookForCallbacks($field, $value);
+    #$self->lookForCallbacks($field, $value);
 }
 sub objectAccessor {
     my ($self, $field, $value) = @_;
@@ -444,11 +462,10 @@ sub objectAccessor {
     }
     return if $self->{doc} && $value && $self->{doc}->{$field} && $value eq $self->{doc}->{$field};
 
-    $self->registerChange($field, '$set', $value);
+    my $callbacks = $self->lookForCallbacks($field, $value);
+    $self->registerChange($field, '$set', $value, $callbacks);
     # XXX unsure if we want to set doc or not.... if we do, it makes insert/upsert easier
     $self->{doc}->{$field} = $value;
-
-    $self->lookForCallbacks($field, $value);
 } 
 sub dbrefAccessor {
     return defaultAccessor(@_);
