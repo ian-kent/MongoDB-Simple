@@ -21,6 +21,10 @@ sub registerChange {
     $self->log(" -- new field is: $field");
     $self->{parent}->registerChange($field, $change, $value, $callbacks);
 }
+sub lookForCallbacks {
+    my $self = shift;
+    return $self->{parent}->lookForCallbacks(@_);
+}
 
 sub new {
     my ($class, %args) = @_;
@@ -50,17 +54,21 @@ sub STORE    {
     my ($self, $key, $value) = @_;
     $self->{parent}->log("HashType::Store key[$key], value[$value]");
     $self->{hash}->{$key} = $value;
-    if(ref $value =~ /HASH/ && !tied($value)) {
-        my %h = (%$value);
-        my $o = tie %h, 'MongoDB::Simple::HashType', hash => $value, parent => $self, field => $key;
-        $self->{objcache}->{$key} = {
-            objref => $o,
-            hashref => \%h
-        };
-    } elsif(ref $value =~ /ARRAY/ && !tied($value)) {
-        # TODO same for arrays
-    }
-    $self->registerChange($key, '$set', $value);
+#    if(ref $value =~ /HASH/ && !tied($value)) {
+#        my %h = (%$value);
+#        my $o = tie %h, 'MongoDB::Simple::HashType', hash => $value, parent => $self, field => $key;
+#        $self->{objcache}->{$key} = {
+#            objref => $o,
+#            hashref => \%h
+#        };
+#    } elsif(ref $value =~ /ARRAY/ && !tied($value)) {
+#        # TODO same for arrays
+#    }
+    #if(ref $value ne 'HASH' && ref $value ne 'ARRAY') {
+        # array and hash types handle pushes etc themselves?
+# TODO if we create an empty array ref and then push to it, the item gets added once here and once with the push
+        $self->registerChange($key, '$set', $value);
+    #}
 }
 sub FETCH    {
     my ($self, $key) = @_;
@@ -84,9 +92,20 @@ sub FETCH    {
             hashref => \%h
         };
         return \%h;
-    } elsif($value && (ref $value eq '/ARRAY/') && !tied($value)) {
+    } elsif($value && (ref $value eq 'ARRAY') && !tied($value)) {
         $self->{parent}->log("HashType::Fetch value is array and not tied");
-        # TODO same for arrays
+        if($self->{arraycache}->{$key}) {
+            $self->{parent}->log("HashType::Fetch key found in arraycache");
+            return $self->{arraycache}->{$key}->{arrayref};
+        }
+        my @arr = (@$value);
+        my $o = tie @arr, 'MongoDB::Simple::ArrayType', array => $value, parent => $self, field => $key;
+        $self->{arraycache}->{$key} = {
+            objref => $o,
+            arrayref => \@arr
+        };
+        $self->{parent}->log("HashType::Fetch returning new array");
+        return \@arr;
     } else {
         $self->{parent}->log("HashType::Fetch value is not array, hash or is already tied");
     }

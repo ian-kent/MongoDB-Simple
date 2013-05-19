@@ -45,7 +45,8 @@ sub STORE     {
     my ($self, $index, $value) = @_;
     $self->{parent}->log("ArrayType::STORE index[$index], value[$value]");
     # TODO need to add change to set array item
-    $self->[$index] = $value; 
+    $self->{array}->[$index] = $value; 
+    $self->{parent}->registerChange($self->{field} . '.' . $index, '$set', $value);
 }
 sub FETCH     { 
     my ($self, $index) = @_;

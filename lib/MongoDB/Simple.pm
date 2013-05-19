@@ -309,7 +309,7 @@ sub lookForCallbacks {
             };
         }
     }
-    if($self->{meta}->{fields}->{$field}->{type} eq 'array') {
+    if($self->{meta}->{fields}->{$field}->{type} && $self->{meta}->{fields}->{$field}->{type} eq 'array') {
         for my $callback ("push", "pop", "shift", "unshift") {
             next if $type && $type ne "\$$callback";
 

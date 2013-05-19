@@ -99,10 +99,10 @@ subtest 'Update a document - objects' => sub {
 };
 
 subtest 'Update a document - hash objects' => sub {
-    plan tests => 6;
+    plan tests => 8;
 
     SKIP: {
-        skip 'MongoDB connection required for test', 6 if !$client;
+        skip 'MongoDB connection required for test', 8 if !$client;
 
         my ($id, $dt, $meta, $label) = makeNewObject;
 
@@ -150,5 +150,16 @@ subtest 'Update a document - hash objects' => sub {
         $obj->save;
         $obj->load($id);
         is($obj->hash->{info}->{cake}->{panda}, 2, 'Nested hash values can be updated');
+
+        $obj->hash->{test}->{array} = [];
+        push $obj->hash->{test}->{array}, 'Inner push';
+        $obj->save;
+        $obj->load($id);
+        is($obj->hash->{test}->{array}->[0], 'Inner push', 'Arrays nested in hashes can be set');
+
+        $obj->hash->{test}->{array}->[0] = 'Inner update';
+        $obj->save;
+        $obj->load($id);
+        is($obj->hash->{test}->{array}->[0], 'Inner update', 'Arrays nested in hashes can be updated');
     }
 };
