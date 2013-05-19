@@ -99,10 +99,10 @@ subtest 'Update a document - objects' => sub {
 };
 
 subtest 'Update a document - hash objects' => sub {
-    plan tests => 4;
+    plan tests => 6;
 
     SKIP: {
-        skip 'MongoDB connection required for test', 4 if !$client;
+        skip 'MongoDB connection required for test', 6 if !$client;
 
         my ($id, $dt, $meta, $label) = makeNewObject;
 
@@ -140,5 +140,15 @@ subtest 'Update a document - hash objects' => sub {
         $obj->save;
         $obj->load($id);
         is($obj->hash->{type}, 'spotted', 'String inside a hash is updated');
+
+        $obj->hash->{info}->{cake}->{panda} = 1;
+        $obj->save;
+        $obj->load($id);
+        is($obj->hash->{info}->{cake}->{panda}, 1, 'Nested hash values can be set');
+
+        $obj->hash->{info}->{cake}->{panda} = 2;
+        $obj->save;
+        $obj->load($id);
+        is($obj->hash->{info}->{cake}->{panda}, 2, 'Nested hash values can be updated');
     }
 };

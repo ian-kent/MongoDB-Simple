@@ -9,6 +9,19 @@ our @ISA = ('Tie::Hash');
 
 # Copied from Tie::StdArray and modified to use a hash
 
+sub log {
+    my $self = shift;
+    $self->{parent}->log(@_);
+}
+sub registerChange {
+    my ($self, $field, $change, $value, $callbacks) = @_;
+    # TODO namespacing
+    $self->log("HashType::registerChange for field[$field], change[$change], value[$value]");
+    $field = $self->{field} . '.' . $field;
+    $self->log(" -- new field is: $field");
+    $self->{parent}->registerChange($field, $change, $value, $callbacks);
+}
+
 sub new {
     my ($class, %args) = @_;
 
@@ -18,6 +31,8 @@ sub new {
         'field' => undef,
         'meta' => undef,
         'doc' => {}, # represents the hashref used by mongodb
+        'objcache' => {},
+        'arraycache' => {},
         %args
     }, $class;
 
@@ -35,14 +50,48 @@ sub STORE    {
     my ($self, $key, $value) = @_;
     $self->{parent}->log("HashType::Store key[$key], value[$value]");
     $self->{hash}->{$key} = $value;
-    # TODO deal with non-scalar values (tie hashes/arrays, set key for change tracking)
-    $self->{parent}->registerChange($self->{field} . '.' . $key, '$set', $value);
+    if(ref $value =~ /HASH/ && !tied($value)) {
+        my %h = (%$value);
+        my $o = tie %h, 'MongoDB::Simple::HashType', hash => $value, parent => $self, field => $key;
+        $self->{objcache}->{$key} = {
+            objref => $o,
+            hashref => \%h
+        };
+    } elsif(ref $value =~ /ARRAY/ && !tied($value)) {
+        # TODO same for arrays
+    }
+    $self->registerChange($key, '$set', $value);
 }
 sub FETCH    {
     my ($self, $key) = @_;
-    # TODO add key to non-scalar values (for object/array/hash change tracking)
-    $self->{parent}->log("HashType::Fetch key[$key]");
-    return $self->{hash}->{$key};
+    my $value = $self->{hash}->{$key};
+    if($value) {
+        $self->{parent}->log("HashType::Fetch key[$key], value[$value], ref[" . ref($value) . "], tied[" . (tied $value ? tied $value : '') . "]");
+    } else {
+        $self->{parent}->log("HashType::Fetch key[$key], value is undefined");
+    }
+
+    if($value && (ref $value eq 'HASH') && !tied($value)) {
+        $self->{parent}->log("HashType::Fetch value is hash and not tied");
+        if($self->{objcache}->{$key}) {
+            $self->{parent}->log("HashType::Fetch key found in objcache");
+            return $self->{objcache}->{$key}->{hashref};
+        }
+        my %h = (%$value);
+        my $o = tie %h, 'MongoDB::Simple::HashType', hash => $value, parent => $self, field => $key;
+        $self->{objcache}->{$key} = {
+            objref => $o,
+            hashref => \%h
+        };
+        return \%h;
+    } elsif($value && (ref $value eq '/ARRAY/') && !tied($value)) {
+        $self->{parent}->log("HashType::Fetch value is array and not tied");
+        # TODO same for arrays
+    } else {
+        $self->{parent}->log("HashType::Fetch value is not array, hash or is already tied");
+    }
+
+    return $value;
 }
 sub FIRSTKEY { 
     my ($self) = @_;
