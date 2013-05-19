@@ -73,7 +73,8 @@ sub POP       {
     if($obj) {
         my $value = $obj;
         $value = $obj->{doc} if ref($obj) !~ /^(|HASH)$/;
-        $self->{parent}->registerChange($self->{field}, '$pop', $obj);
+        my $callbacks = $self->{parent}->lookForCallbacks($self->{field}, $value, '$pop');
+        $self->{parent}->registerChange($self->{field}, '$pop', $obj, $callbacks);
     }
 
     return $obj;
@@ -121,7 +122,8 @@ sub PUSH      {
         #push @{$self->{parent}->{changes}->{$self->{field}}}, $value;
         #push @{$self->{parent}->{doc}->{$self->{field}}}, $value;
         $self->{parent}->log("ARRAYTYPE push obj " . (ref $obj));
-        $self->{parent}->registerChange($self->{field}, '$push', $value);
+        my $callbacks = $self->{parent}->lookForCallbacks($self->{field}, $value, '$pop');
+        $self->{parent}->registerChange($self->{field}, '$push', $value, $callbacks);
         push @{$self->{doc}}, $value;
 
         push @{$self->{array}}, $obj;
@@ -137,7 +139,8 @@ sub SHIFT     {
     if($class && $class !~ /HASH/) {
         $value = $obj->{doc};
     }
-    $self->{parent}->registerChange($self->{field}, '$shift', $obj);
+    my $callbacks = $self->{parent}->lookForCallbacks($self->{field}, $value, '$shift');
+    $self->{parent}->registerChange($self->{field}, '$shift', $obj, $callbacks);
     return $obj;
 }
 sub UNSHIFT   { 
@@ -150,7 +153,7 @@ sub UNSHIFT   {
         # rewriting the array in the right order...
         # FIXME consider adding configurable option to force unshift to work
         if($self->{parent}->{warnOnUnshiftOperator}) {
-            warn "unshift on MongoDB::Simple::ArrayType behaves like push";
+            warn "unshift on MongoDB::Simple::ArrayType behaves like push (including callbacks - 'pop' is called instead of 'unshift'). you can disable this warning by setting 'warnOnUnshiftOperator'";
         }
         $self->{parent}->log("ArrayType::UNSHIFT (forceUnshiftOperator => 0)");
         return PUSH($self, @_);
@@ -195,7 +198,8 @@ sub UNSHIFT   {
         #unshift @{$self->{parent}->{changes}->{$self->{field}}}, $value;
         #push @{$self->{parent}->{doc}->{$self->{field}}}, $value;
         #$self->{'$unshift'} = 1;
-        $self->{parent}->registerChange($self->{field}, '$unshift', $self->{array});
+        my $callbacks = $self->{parent}->lookForCallbacks($self->{field}, $value, '$unshift');
+        $self->{parent}->registerChange($self->{field}, '$unshift', $self->{array}, $callbacks);
 
         unshift @{$self->{array}}, $obj;
         unshift @{$self->{doc}}, $obj;

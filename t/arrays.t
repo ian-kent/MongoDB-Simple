@@ -140,7 +140,7 @@ subtest 'Update a document - scalar array operators' => sub {
         # i.e., that unshift behaves like push
         ($id, $dt, $meta, $label) = makeNewObject;
         $obj->load($id);
-        warning_is { unshift $obj->tags, 'Unshift test'; } 'unshift on MongoDB::Simple::ArrayType behaves like push', 'Use of unshift without forceUnshiftOperator generates warning';
+        warning_is { unshift $obj->tags, 'Unshift test'; } 'unshift on MongoDB::Simple::ArrayType behaves like push (including callbacks - \'pop\' is called instead of \'unshift\'). you can disable this warning by setting \'warnOnUnshiftOperator\'', 'Use of unshift without forceUnshiftOperator generates warning';
         $obj->save;
         $obj->load($id);
         is_deeply($obj->{doc}, {

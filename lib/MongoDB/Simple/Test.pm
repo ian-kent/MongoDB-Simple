@@ -33,8 +33,6 @@ package MongoDB::Simple::Test::Meta;
 use MongoDB::Simple;
 our @ISA = ('MongoDB::Simple');
 
-#parent type => 'MongoDB::Simple::Test', key => 'metadata';
-
 matches sub {
     my ($doc) = @_;
     my %keys = map { $_ => 1 } keys %$doc;
@@ -51,8 +49,6 @@ package MongoDB::Simple::Test::Label;
 
 use MongoDB::Simple;
 our @ISA = ('MongoDB::Simple');
-
-#parent type => 'MongoDB::Simple::Test', key => 'labels';
 
 matches sub {
     my ($doc) = @_;

@@ -294,20 +294,24 @@ sub dump {
 ################################################################################
 
 sub lookForCallbacks {
-    my ($self, $field, $value) = @_;
+    my ($self, $field, $value, $type) = @_;
 
     my @callbacks = ();
     $self->log("lookForCallbacks: field[$field], value[" . ($value ? $value : '<undef>') . "]");
-    if($self->{meta}->{fields}->{$field}->{args}->{changed}) {
-        $self->log("lookForCallbacks: adding 'changed' callback for field '$field'");
-        push @callbacks, sub {
-            my $cb = $self->{meta}->{fields}->{$field}->{args}->{changed};
-            $self->log("callback capture: field[$field], value[" . ($value ? $value : '<undef>') . "]");
-            &$cb($self, $value);
-        };
+    if(!$type || $type eq '$set') {
+        if($self->{meta}->{fields}->{$field}->{args}->{changed}) {
+            $self->log("lookForCallbacks: adding 'changed' callback for field '$field'");
+            push @callbacks, sub {
+                my $cb = $self->{meta}->{fields}->{$field}->{args}->{changed};
+                $self->log("callback capture: field[$field], value[" . ($value ? $value : '<undef>') . "]");
+                &$cb($self, $value);
+            };
+        }
     }
     if($self->{meta}->{fields}->{$field}->{type} eq 'array') {
         for my $callback ("push", "pop", "shift", "unshift") {
+            next if $type && $type ne "\$$callback";
+
             if($self->{meta}->{fields}->{$field}->{args}->{$callback}) {
                 $self->log("lookForCallbacks: adding '$callback' callback for field '$field'");
                 push @callbacks, sub {
