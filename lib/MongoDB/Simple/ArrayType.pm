@@ -86,6 +86,7 @@ sub PUSH      {
 
     for(my $i = 0; $i < scalar @_; $i++) {
         my $obj = $_[$i];
+        $self->{parent}->log(" -- i[$i], obj[$obj]");
 
         if(ref $obj eq 'HASH' && ($self->{meta}->{args}->{type} || $self->{meta}->{args}->{types})) {
             my $type = $self->{meta}->{args}->{type};
@@ -122,7 +123,7 @@ sub PUSH      {
         #push @{$self->{parent}->{changes}->{$self->{field}}}, $value;
         #push @{$self->{parent}->{doc}->{$self->{field}}}, $value;
         $self->{parent}->log("ARRAYTYPE push obj " . (ref $obj));
-        my $callbacks = $self->{parent}->lookForCallbacks($self->{field}, $value, '$pop');
+        my $callbacks = $self->{parent}->lookForCallbacks($self->{field}, $value, '$push');
         $self->{parent}->registerChange($self->{field}, '$push', $value, $callbacks);
         push @{$self->{doc}}, $value;
 

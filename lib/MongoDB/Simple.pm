@@ -231,6 +231,7 @@ sub save {
                 });
             }
             if($change->{callbacks}) {
+                $self->log("Running callbacks for field " . $change->{field});
                 for my $cb (@{$change->{callbacks}}) {
                     &$cb;
                 }
@@ -315,7 +316,7 @@ sub lookForCallbacks {
             if($self->{meta}->{fields}->{$field}->{args}->{$callback}) {
                 $self->log("lookForCallbacks: adding '$callback' callback for field '$field'");
                 push @callbacks, sub {
-                    my $cb = $self->{meta}->{fields}->{$field}->{args}->{callback};
+                    my $cb = $self->{meta}->{fields}->{$field}->{args}->{$callback};
                     $self->log("callback capture: field[$field], value[" . ($value ? $value : '<undef>') . "]");
                     &$cb($self, $value);
                 };
@@ -457,8 +458,6 @@ sub objectAccessor {
                 if($self->{objcache}->{$field}) {
                     $self->log("Returning already tied hash for field [$field] on getter");
                     #return $self->{objcache}->{$field}->{hash};
-use Data::Dumper;
-print Dumper $self->{doc}->{$field};
                     return $self->{objcache}->{$field}->{hashref};
                 }
                 my %hashx = (%{$self->{doc}->{$field}});
