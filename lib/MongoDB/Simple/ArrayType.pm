@@ -38,11 +38,13 @@ sub FETCHSIZE {
 sub STORESIZE { 
     my ($self, $size) = @_;
     $self->{parent}->log("ArrayType::STORESIZE size[$size]");
+    # TODO need to truncate the array
     $#{$self->{array}} = $size-1;
 }
 sub STORE     { 
     my ($self, $index, $value) = @_;
     $self->{parent}->log("ArrayType::STORE index[$index], value[$value]");
+    # TODO need to add change to set array item
     $self->[$index] = $value; 
 }
 sub FETCH     { 
@@ -59,6 +61,7 @@ sub FETCH     {
 sub CLEAR     { 
     my ($self) = @_;
     $self->{parent}->log("ArrayType::CLEAR");
+    # TODO need to add change to clear array
     $self->{array} = [];
 }
 sub POP       { 
@@ -207,6 +210,7 @@ sub EXISTS    {
 sub DELETE    { 
     my ($self, $index) = @_;
     $self->{parent}->log("ArrayType::DELETE index[$index]");
+    # TODO need to remove array item - or maybe just undef if, whatever perl does
     delete $self->{array}->[$index];
 }
 

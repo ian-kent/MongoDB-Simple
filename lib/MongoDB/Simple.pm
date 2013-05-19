@@ -9,6 +9,7 @@ our @EXPORT = qw/ collection string date array object parent dbref boolean oid d
 
 use MongoDB;
 use MongoDB::Simple::ArrayType;
+use MongoDB::Simple::HashType;
 
 use Switch;
 use DateTime;
@@ -441,17 +442,30 @@ sub objectAccessor {
     my $obj;
 
     if(scalar @_ <= 2) {
-        if($type) {
-            if($self->{objcache}->{$field}) {
-                return $self->{objcache}->{$field};
-            }
-            if($self->{doc}->{$field}) {
+        if(defined $self->{doc}->{$field}) {
+            if($type) {
+                if($self->{objcache}->{$field}) {
+                    return $self->{objcache}->{$field};
+                }
                 $obj = $type->new(parent => $self, doc => $self->{doc}->{$field}, field => $field);
                 $self->{objcache}->{$field} = $obj;
+                return $obj;
+            } else {
+                if($self->{objcache}->{$field}) {
+                    $self->log("Returning already tied hash for field [$field] on getter");
+                    #return $self->{objcache}->{$field}->{hash};
+                    return $self->{doc}->{$field};
+                }
+                my %hashx = (%{$self->{doc}->{$field}});
+                $self->log("Tying hash for field [$field] on getter");
+                $obj = tie %hashx, 'MongoDB::Simple::HashType', hash => $self->{doc}->{$field}, parent => $self, field => $field;
+                $self->{objcache}->{$field} = $obj;
+                $self->{doc}->{$field} = \%hashx;
+                return $self->{doc}->{$field};
             }
-            return $obj;
+        } else {
+            return undef;
         }
-        return $self->{doc}->{$field};
     }
 
     if(ref($value) !~ /^HASH$/) {
@@ -459,6 +473,13 @@ sub objectAccessor {
         $value->{parent} = $self;
         $value->{field} = $field;
         $value = $value->{doc};
+    } else {
+        if(!tied($value)) {
+            my %hashx;
+            $self->log("Tying hash for field [$field] on setter");
+            my $obj = tie %hashx, 'MongoDB::Simple::HashType', hash => $value, parent => $self, field => $field;
+            $self->{objcache}->{$field} = $obj;
+        }
     }
     return if $self->{doc} && $value && $self->{doc}->{$field} && $value eq $self->{doc}->{$field};
 

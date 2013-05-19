@@ -24,6 +24,7 @@ array 'tags'         => undef;
 object 'metadata'    => { type => 'MongoDB::Simple::Test::Meta' };
 array 'labels'       => { type => 'MongoDB::Simple::Test::Label' };
 array 'multi'        => { types => [ 'MongoDB::Simple::Test::Meta', 'MongoDB::Simple::Test::Label' ] };
+object 'hash'        => undef;
 
 ################################################################################
 

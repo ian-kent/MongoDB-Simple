@@ -1,5 +1,6 @@
 lib/MongoDB/Simple.pm
 lib/MongoDB/Simple/ArrayType.pm
+lib/MongoDB/Simple/HashType.pm
 lib/MongoDB/Simple/Test.pm
 t/simple.t
 t/scalars.t
