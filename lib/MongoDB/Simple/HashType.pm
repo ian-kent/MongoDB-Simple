@@ -47,11 +47,15 @@ sub FETCH    {
 sub FIRSTKEY { 
     my ($self) = @_;
     my $a = keys %{$self->{hash}};
-    return each %{$self->{hash}};
+    my $ret = each %{$self->{hash}};
+    $self->{parent}->log("HashType::FirstKey returning[" . ($ret ? $ret : '<undef>') . "]");
+    return $ret;
 }
 sub NEXTKEY  { 
     my ($self) = @_;
-    return each %{$self->{hash}};
+    my $ret = each %{$self->{hash}};
+    $self->{parent}->log("HashType::NextKey returning[" . ($ret ? $ret : '<undef>') . "]");
+    return $ret;
 }
 sub EXISTS   { 
     my ($self, $key) = @_;

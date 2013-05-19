@@ -65,7 +65,6 @@ sub new {
         'meta'          => undef, # stores the keyword metadata
         'doc'           => {}, # stores the document
         'changes'       => [], # stores changes made since load/save
-        'callbacks'     => [], # stores callbacks needed for changes
         'parent'        => undef, # stores the parent object
         'field'         => undef, # stores the field name from the parent object
         'index'         => undef, # stores the index (if the item is in an array)
@@ -454,13 +453,18 @@ sub objectAccessor {
                 if($self->{objcache}->{$field}) {
                     $self->log("Returning already tied hash for field [$field] on getter");
                     #return $self->{objcache}->{$field}->{hash};
-                    return $self->{doc}->{$field};
+use Data::Dumper;
+print Dumper $self->{doc}->{$field};
+                    return $self->{objcache}->{$field}->{hashref};
                 }
                 my %hashx = (%{$self->{doc}->{$field}});
                 $self->log("Tying hash for field [$field] on getter");
                 $obj = tie %hashx, 'MongoDB::Simple::HashType', hash => $self->{doc}->{$field}, parent => $self, field => $field;
-                $self->{objcache}->{$field} = $obj;
-                $self->{doc}->{$field} = \%hashx;
+                $self->{objcache}->{$field} = {
+                    objref => $obj,
+                    hashref => \%hashx
+                };
+                #$self->{doc}->{$field} = \%hashx;
                 return $self->{doc}->{$field};
             }
         } else {
@@ -478,7 +482,10 @@ sub objectAccessor {
             my %hashx;
             $self->log("Tying hash for field [$field] on setter");
             my $obj = tie %hashx, 'MongoDB::Simple::HashType', hash => $value, parent => $self, field => $field;
-            $self->{objcache}->{$field} = $obj;
+            $self->{objcache}->{$field} = {
+                objref => $obj,
+                hashref => \%hashx
+            };
         }
     }
     return if $self->{doc} && $value && $self->{doc}->{$field} && $value eq $self->{doc}->{$field};
